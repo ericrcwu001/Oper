@@ -26,6 +26,31 @@ Node.js/Express backend for the AI Emergency Response Simulator. Generates emerg
 
 ## API
 
+### POST `/api/scenarios/generate` (Flask, Python)
+
+Generates a dynamic 911 training scenario (including edge/rare cases) from a difficulty level. Uses OpenAI (e.g. gpt-4o-mini) and returns a structured payload for the frontend and for the ElevenLabs Flash v2.5 voice agent.
+
+**Run Flask:** From `backend/`, run `pip install -r requirements.txt` then `flask --app app run` (or `python -m flask --app app run`). Set `OPENAI_API_KEY` in the environment.
+
+**Request body (JSON):**
+
+```json
+{ "difficulty": "medium" }
+```
+
+- `difficulty` (required): `"easy"` | `"medium"` | `"hard"`.
+
+**Response (200):** A single JSON object with:
+
+- **scenario** — Frontend-compatible: `id`, `scenario_type`, `title`, `description`, `caller_profile` (`name`, `age`, `emotion`), `critical_info[]`, `expected_actions[]`, `optional_complications[]`, `difficulty`, `language` (`"en"`).
+- **persona** — ElevenLabs Flash v2.5: `stability` (0–1), `style` (0–1), `speed` (float), `voice_description` (string). Pass `stability`, `style`, `speed` to ElevenLabs `voice_settings`; include `voice_description` in the agent system prompt.
+- **caller_script** — Array of suggested caller lines.
+- **role_instruction**, **scenario_summary_for_agent**, **critical_info**, **behavior_notes** — Use with `build_voice_agent_system_prompt(payload)` (from `scenario_generator`) to build the full system prompt for the ElevenLabs Flash v2.5 voice agent.
+
+**Persona → ElevenLabs:** Use `persona.stability`, `persona.style`, `persona.speed` in the ElevenLabs API `voice_settings`. Use `persona.voice_description` in the agent system prompt (e.g. “You sound like …”). Build the full prompt with `scenario_generator.build_voice_agent_system_prompt(payload)`.
+
+---
+
 ### POST `/generate-call-audio`
 
 Generates caller dialog for a scenario and returns an audio URL and transcript.

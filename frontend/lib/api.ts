@@ -91,3 +91,36 @@ export async function interactWithVoice(
   }
   return res.json() as Promise<InteractResponse>
 }
+
+export interface Evaluation {
+  protocolAdherence: number
+  timeliness: number
+  criticalInfoCapture: number
+  overallScore: number
+  missedActions: string[]
+  feedbackBullets: string[]
+}
+
+/**
+ * Evaluate operator performance from transcript and notes (POST /evaluate).
+ */
+export async function evaluateCall(
+  transcript: { speaker: string; text: string; timestamp?: number }[],
+  notes: { text: string; tag?: string; timestamp?: number }[],
+  scenarioDescription: string
+): Promise<Evaluation> {
+  const res = await fetch(`${API_BASE}/evaluate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      transcript,
+      notes,
+      scenarioDescription,
+    }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error((err as { error?: string }).error ?? "Evaluation failed")
+  }
+  return res.json() as Promise<Evaluation>
+}
