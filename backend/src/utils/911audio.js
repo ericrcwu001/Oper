@@ -4,12 +4,65 @@
 //
 // Requirements: ffmpeg on PATH
 
-import { spawn } from "child_process";
+import { spawn, execSync } from "child_process";
 import fs from "fs/promises";
+import fsSync from "fs";
+import os from "os";
+import path from "path";
+
+let cachedFfmpegPath = null;
+
+/** Resolve ffmpeg: FFMPEG_PATH env > where (Windows) > winget Gyan.FFmpeg bin > "ffmpeg". */
+function getFfmpegCommand() {
+  if (cachedFfmpegPath) return cachedFfmpegPath;
+  const envPath = process.env.FFMPEG_PATH?.trim();
+  if (envPath && fsSync.existsSync(envPath)) {
+    cachedFfmpegPath = envPath;
+    return cachedFfmpegPath;
+  }
+  if (process.platform === "win32") {
+    try {
+      const out = execSync("where ffmpeg", { encoding: "utf8", timeout: 2000 });
+      const first = out.split("\n")[0]?.trim();
+      if (first && first.endsWith("ffmpeg.exe") && fsSync.existsSync(first)) {
+        cachedFfmpegPath = first;
+        return cachedFfmpegPath;
+      }
+    } catch {
+      // ignore
+    }
+    // Winget Gyan.FFmpeg installs to .../ffmpeg-*-full_build/bin/ but PATH often points at parent only
+    try {
+      const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+      const winGetPkgs = path.join(localAppData, "Microsoft", "WinGet", "Packages");
+      if (fsSync.existsSync(winGetPkgs)) {
+        const dirs = fsSync.readdirSync(winGetPkgs);
+        for (const d of dirs) {
+          if (!d.startsWith("Gyan.FFmpeg")) continue;
+          const pkgDir = path.join(winGetPkgs, d);
+          const subdirs = fsSync.readdirSync(pkgDir);
+          for (const sub of subdirs) {
+            if (sub.startsWith("ffmpeg-") && sub.endsWith("-full_build")) {
+              const exe = path.join(pkgDir, sub, "bin", "ffmpeg.exe");
+              if (fsSync.existsSync(exe)) {
+                cachedFfmpegPath = exe;
+                return cachedFfmpegPath;
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return "ffmpeg";
+}
 
 function run(cmd, args, { timeoutMs = 60_000 } = {}) {
+  const resolvedCmd = cmd === "ffmpeg" ? getFfmpegCommand() : cmd;
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { stdio: ["ignore", "ignore", "pipe"] });
+    const child = spawn(resolvedCmd, args, { stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
 
     const timer = setTimeout(() => {
@@ -135,4 +188,37 @@ export async function convertMp3ToWav(mp3Path, wavPath) {
     "pcm_s16le",
     wavPath,
   ]);
+}
+
+/**
+ * Convert WebM (or other) audio buffer to WAV for Whisper. Uses ffmpeg.
+ * @param {Buffer} audioBuffer - Raw audio (e.g. webm from browser MediaRecorder)
+ * @returns {Promise<Buffer>} - WAV file buffer (16kHz mono, Whisper-friendly)
+ * @throws {Error} - If ffmpeg is missing or conversion fails
+ */
+export async function convertWebmToWav(audioBuffer) {
+  const tmpDir = os.tmpdir();
+  const id = `voice-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  const webmPath = path.join(tmpDir, `${id}.webm`);
+  const wavPath = path.join(tmpDir, `${id}.wav`);
+  try {
+    await fs.writeFile(webmPath, audioBuffer);
+    await run("ffmpeg", [
+      "-y",
+      "-i",
+      webmPath,
+      "-ac",
+      "1",
+      "-ar",
+      "16000",
+      "-c:a",
+      "pcm_s16le",
+      wavPath,
+    ], { timeoutMs: 15_000 });
+    const wavBuffer = await fs.readFile(wavPath);
+    return wavBuffer;
+  } finally {
+    await unlinkSafe(webmPath);
+    await unlinkSafe(wavPath);
+  }
 }
