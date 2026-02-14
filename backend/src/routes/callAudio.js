@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { generateCallDialog, getNextCallerResponse } from '../services/openaiService.js';
 import { textToSpeech } from '../services/elevenlabsService.js';
 import { speechToText } from '../services/whisperService.js';
+import { evaluateCall } from '../services/evaluationService.js';
 
 const router = Router();
 
@@ -222,6 +223,33 @@ router.post('/interact', async (req, res) => {
       error: 'Interaction failed.',
       details: err.message,
     });
+  }
+});
+
+/**
+ * POST /evaluate
+ *
+ * Body: { transcript: TranscriptTurn[], notes: NoteEntry[], scenarioDescription: string }
+ * Returns: { protocolAdherence, timeliness, criticalInfoCapture, overallScore, missedActions, feedbackBullets }
+ */
+router.post('/evaluate', async (req, res) => {
+  try {
+    const { transcript, notes, scenarioDescription } = req.body;
+    if (!Array.isArray(transcript)) {
+      return res.status(400).json({ error: 'Missing or invalid "transcript" array.' });
+    }
+    if (!Array.isArray(notes)) {
+      return res.status(400).json({ error: 'Missing or invalid "notes" array.' });
+    }
+    const scenario = typeof scenarioDescription === 'string' ? scenarioDescription.trim() : '';
+    const evaluation = await evaluateCall(transcript, notes, scenario || '911 emergency call.');
+    return res.status(200).json(evaluation);
+  } catch (err) {
+    console.error('evaluate error:', err.message);
+    if (err.message.includes('OPENAI_API_KEY')) {
+      return res.status(503).json({ error: 'Service configuration error.', details: err.message });
+    }
+    return res.status(500).json({ error: 'Evaluation failed.', details: err.message });
   }
 });
 
