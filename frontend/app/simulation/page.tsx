@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/select"
 import type { Difficulty, Language } from "@/lib/types"
 import { generateScenario } from "@/lib/api"
-import { ArrowRight, Settings2, Sparkles, Loader2, AlertCircle } from "lucide-react"
+import { ArrowRight, Settings2, Loader2, AlertCircle } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
 const GENERATED_SCENARIO_STORAGE_KEY = "simulation-generated-scenario"
@@ -27,8 +27,6 @@ export default function SimulationSetupPage() {
   const [enableHints, setEnableHints] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [generateLoading, setGenerateLoading] = useState(false)
-  const [generateError, setGenerateError] = useState<string | null>(null)
 
   const handleStart = async () => {
     setLoading(true)
@@ -47,26 +45,6 @@ export default function SimulationSetupPage() {
       setError(e instanceof Error ? e.message : "Failed to generate scenario")
     } finally {
       setLoading(false)
-    }
-  }
-
-  const handleGenerateAndStart = async () => {
-    setGenerateLoading(true)
-    setGenerateError(null)
-    try {
-      const payload = await generateScenario(difficulty)
-      const sessionId = `sim-${Date.now()}`
-      sessionStorage.setItem(
-        `${GENERATED_SCENARIO_STORAGE_KEY}-${sessionId}`,
-        JSON.stringify(payload)
-      )
-      router.push(
-        `/simulation/${sessionId}?scenario=generated&difficulty=${difficulty}&language=${language}&hints=${enableHints}`
-      )
-    } catch (e) {
-      setGenerateError(e instanceof Error ? e.message : "Failed to generate scenario")
-    } finally {
-      setGenerateLoading(false)
     }
   }
 
@@ -152,10 +130,10 @@ export default function SimulationSetupPage() {
                   />
                 </div>
 
-                {(error || generateError) && (
+                {error && (
                   <div className="flex items-center gap-2 rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                     <AlertCircle className="h-4 w-4 shrink-0" />
-                    {error ?? generateError}
+                    {error}
                   </div>
                 )}
 
@@ -176,27 +154,6 @@ export default function SimulationSetupPage() {
                       <ArrowRight className="h-4 w-4" />
                     </>
                   )}
-                </Button>
-
-                <div className="relative my-2 flex items-center gap-2 text-xs text-muted-foreground">
-                  <span className="flex-1 border-t" />
-                  <span>or</span>
-                  <span className="flex-1 border-t" />
-                </div>
-
-                <Button
-                  size="lg"
-                  variant="outline"
-                  className="w-full gap-2"
-                  disabled={generateLoading}
-                  onClick={handleGenerateAndStart}
-                >
-                  {generateLoading ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Sparkles className="h-4 w-4" />
-                  )}
-                  {generateLoading ? "Generating call..." : "Generate call & start"}
                 </Button>
               </CardContent>
             </Card>
