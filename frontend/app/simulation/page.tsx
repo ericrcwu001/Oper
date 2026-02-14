@@ -15,9 +15,12 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { scenarios } from "@/lib/mock-data"
+import { generateScenario } from "@/lib/api"
 import type { Difficulty, Language } from "@/lib/types"
-import { ArrowRight, Settings2 } from "lucide-react"
+import { ArrowRight, Settings2, Sparkles, Loader2 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+
+const GENERATED_SCENARIO_STORAGE_KEY = "simulation-generated-scenario"
 
 export default function SimulationSetupPage() {
   const router = useRouter()
@@ -26,16 +29,38 @@ export default function SimulationSetupPage() {
   const [language, setLanguage] = useState<Language>("en")
   const [enableHints, setEnableHints] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [generateLoading, setGenerateLoading] = useState(false)
+  const [generateError, setGenerateError] = useState<string | null>(null)
 
   const handleStart = async () => {
     if (!selectedId) return
     setLoading(true)
-    // Mock POST to create session
+    setGenerateError(null)
     await new Promise((resolve) => setTimeout(resolve, 600))
     const sessionId = `sim-${Date.now()}`
     router.push(
       `/simulation/${sessionId}?scenario=${selectedId}&difficulty=${difficulty}&language=${language}&hints=${enableHints}`
     )
+  }
+
+  const handleGenerateAndStart = async () => {
+    setGenerateLoading(true)
+    setGenerateError(null)
+    try {
+      const payload = await generateScenario(difficulty)
+      const sessionId = `sim-${Date.now()}`
+      sessionStorage.setItem(
+        `${GENERATED_SCENARIO_STORAGE_KEY}-${sessionId}`,
+        JSON.stringify(payload)
+      )
+      router.push(
+        `/simulation/${sessionId}?scenario=generated&difficulty=${difficulty}&language=${language}&hints=${enableHints}`
+      )
+    } catch (e) {
+      setGenerateError(e instanceof Error ? e.message : "Failed to generate scenario")
+    } finally {
+      setGenerateLoading(false)
+    }
   }
 
   return (
@@ -124,6 +149,10 @@ export default function SimulationSetupPage() {
                   />
                 </div>
 
+                {generateError && (
+                  <p className="text-sm text-destructive">{generateError}</p>
+                )}
+
                 <Button
                   size="lg"
                   className="mt-2 w-full gap-2"
@@ -132,6 +161,27 @@ export default function SimulationSetupPage() {
                 >
                   {loading ? "Starting..." : "Start Simulation"}
                   {!loading && <ArrowRight className="h-4 w-4" />}
+                </Button>
+
+                <div className="relative my-2 flex items-center gap-2 text-xs text-muted-foreground">
+                  <span className="flex-1 border-t" />
+                  <span>or</span>
+                  <span className="flex-1 border-t" />
+                </div>
+
+                <Button
+                  size="lg"
+                  variant="outline"
+                  className="w-full gap-2"
+                  disabled={generateLoading}
+                  onClick={handleGenerateAndStart}
+                >
+                  {generateLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-4 w-4" />
+                  )}
+                  {generateLoading ? "Generating scenario..." : "Generate scenario & start"}
                 </Button>
               </CardContent>
             </Card>
