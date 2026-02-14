@@ -7,7 +7,6 @@ import { AppShell } from "@/components/app-shell"
 import { ScoreCard } from "@/components/score-card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -25,7 +24,7 @@ import {
   CheckCircle2,
 } from "lucide-react"
 import { scenarios, callerScripts } from "@/lib/mock-data"
-import type { TranscriptTurn, Evaluation } from "@/lib/types"
+import type { TranscriptTurn, Evaluation, NoteEntry } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 // Generate a mock evaluation
@@ -114,19 +113,27 @@ export default function ReviewPage({
     }
     return generateReviewTranscript(scenario.scenarioType)
   })
-  const [summary, setSummary] = useState("")
-  const [submitted, setSubmitted] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
+  const [reviewNotes] = useState<NoteEntry[]>(() => {
+    try {
+      if (typeof window !== "undefined") {
+        const raw = sessionStorage.getItem(`simulation-notes-${sessionId}`)
+        if (raw) {
+          const parsed = JSON.parse(raw) as NoteEntry[]
+          if (Array.isArray(parsed)) return parsed
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return []
+  })
 
   const filteredTranscript = searchQuery
     ? reviewTranscript.filter((t) =>
         t.text.toLowerCase().includes(searchQuery.toLowerCase())
       )
     : reviewTranscript
-
-  const handleSubmit = () => {
-    setSubmitted(true)
-  }
 
   return (
     <AppShell>
@@ -247,34 +254,36 @@ export default function ReviewPage({
               </CardContent>
             </Card>
 
-            {/* Operator Summary */}
+            {/* Operator Summary – notes taken during the call */}
             <Card className="border bg-card">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Operator Summary</CardTitle>
               </CardHeader>
               <CardContent>
-                {submitted ? (
-                  <div className="rounded-lg border bg-accent/5 p-4 text-sm text-foreground">
-                    <p className="mb-1 text-xs font-medium text-accent">
-                      Submitted
-                    </p>
-                    {summary}
-                  </div>
+                {reviewNotes.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No notes from this call.
+                  </p>
                 ) : (
-                  <div className="flex flex-col gap-3">
-                    <Textarea
-                      placeholder="Write your summary of the call, key decisions made, and any observations..."
-                      value={summary}
-                      onChange={(e) => setSummary(e.target.value)}
-                      className="min-h-[120px] text-sm"
-                    />
-                    <Button
-                      onClick={handleSubmit}
-                      disabled={!summary.trim()}
-                      className="w-full"
-                    >
-                      Submit Summary
-                    </Button>
+                  <div className="flex flex-col gap-2">
+                    {reviewNotes.map((n) => (
+                      <div
+                        key={n.id}
+                        className="rounded-md border bg-muted/50 px-3 py-2 text-sm"
+                      >
+                        <div className="mb-1 flex items-center gap-2">
+                          <span className="font-mono text-[10px] text-muted-foreground">
+                            {formatTs(n.timestamp)}
+                          </span>
+                          {n.tag && (
+                            <Badge variant="outline" className="text-[10px]">
+                              {n.tag}
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-foreground">{n.text}</p>
+                      </div>
+                    ))}
                   </div>
                 )}
               </CardContent>

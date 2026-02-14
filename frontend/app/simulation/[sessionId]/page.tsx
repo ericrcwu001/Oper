@@ -34,6 +34,7 @@ import type {
   ConnectionStatus,
   ScenarioType,
   Scenario,
+  NoteEntry,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -84,6 +85,7 @@ export default function LiveSimulationPage({
   >([])
   const [apiLoading, setApiLoading] = useState(false)
   const [apiError, setApiError] = useState<string | null>(null)
+  const [notes, setNotes] = useState<NoteEntry[]>([])
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -148,6 +150,7 @@ export default function LiveSimulationPage({
     setTranscript([])
     setCallerAudioUrl(null)
     setConversationHistory([])
+    setNotes([])
     try {
       const scenarioString = buildScenarioString(scenario)
       const data = await generateCallAudio(scenarioString)
@@ -180,6 +183,10 @@ export default function LiveSimulationPage({
       sessionStorage.setItem(
         `simulation-transcript-${sessionId}`,
         JSON.stringify(transcript)
+      )
+      sessionStorage.setItem(
+        `simulation-notes-${sessionId}`,
+        JSON.stringify(notes)
       )
     } catch {
       // ignore storage errors
@@ -551,7 +558,11 @@ export default function LiveSimulationPage({
 
           {/* Right - Notes */}
           <Card className="flex flex-col border bg-card" style={{ height: "560px" }}>
-            <NotesPanel callSeconds={callSeconds} />
+            <NotesPanel
+                callSeconds={callSeconds}
+                notes={notes}
+                onAddNote={(entry) => setNotes((prev) => [...prev, entry])}
+              />
           </Card>
         </div>
       </div>
