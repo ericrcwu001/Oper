@@ -33,6 +33,7 @@ import {
   interact,
   interactWithVoice,
   type GeneratedScenarioPayload,
+  type CallScenarioInput,
 } from "@/lib/api"
 import type {
   TranscriptTurn,
@@ -40,14 +41,25 @@ import type {
   ScenarioType,
   Scenario,
   NoteEntry,
+  Difficulty,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-const STORAGE_KEY_GENERATED = "simulation-generated-scenario"
+const GENERATED_SCENARIO_STORAGE_KEY = "simulation-generated-scenario"
 
-function buildScenarioString(scenario: Scenario): string {
-  const { description, callerProfile } = scenario
-  return `${description} Caller: ${callerProfile.name}, ${callerProfile.age} years old, ${callerProfile.emotion}.`
+function buildScenarioPayload(
+  scenario: Scenario,
+  difficulty?: Difficulty
+): {
+  scenarioDescription: string
+  callerDescription: string
+  difficulty?: Difficulty
+} {
+  return {
+    scenarioDescription: scenario.description,
+    callerDescription: scenario.callerDescription,
+    difficulty: difficulty ?? scenario.difficulty,
+  }
 }
 
 /** Map generator payload to frontend Scenario for UI and hints. */
@@ -58,15 +70,17 @@ function payloadToScenario(payload: GeneratedScenarioPayload): Scenario {
   ).includes(s.scenario_type as ScenarioType)
     ? (s.scenario_type as ScenarioType)
     : "cardiac-arrest"
+  const p = s.caller_profile
   return {
     id: s.id,
     scenarioType: type,
     title: s.title,
     description: s.description,
+    callerDescription: `${p.name}, ${p.age}y, ${p.emotion}`,
     callerProfile: {
-      name: s.caller_profile.name,
-      age: s.caller_profile.age,
-      emotion: s.caller_profile.emotion,
+      name: p.name,
+      age: p.age,
+      emotion: p.emotion,
     },
     criticalInfo: s.critical_info ?? [],
     expectedActions: s.expected_actions ?? [],
@@ -98,6 +112,7 @@ export default function LiveSimulationPage({
   const searchParams = useSearchParams()
   const scenarioIdFromUrl = searchParams.get("scenario")
   const hintsEnabled = searchParams.get("hints") === "true"
+  const selectedDifficulty = (searchParams.get("difficulty") as Difficulty) || "medium"
 
   const fallbackScenario =
     scenarios.find((s) => s.id === (scenarioIdFromUrl || "scenario-1")) ||
@@ -108,7 +123,9 @@ export default function LiveSimulationPage({
 
   useEffect(() => {
     try {
-      const raw = sessionStorage.getItem(`${STORAGE_KEY_GENERATED}-${sessionId}`)
+      const raw = sessionStorage.getItem(
+        `${GENERATED_SCENARIO_STORAGE_KEY}-${sessionId}`
+      )
       if (raw) {
         const payload = JSON.parse(raw) as GeneratedScenarioPayload
         if (payload?.scenario) {
@@ -124,7 +141,12 @@ export default function LiveSimulationPage({
     setScenarioPayload(null)
   }, [sessionId, scenarioIdFromUrl])
 
-  const ScenarioIcon = scenarioIcons[scenario.scenarioType] || Heart
+  const scenarioForApi: CallScenarioInput =
+    scenarioPayload ?? buildScenarioPayload(scenario, selectedDifficulty)
+  const ScenarioIcon =
+    scenarioIdFromUrl === "generated"
+      ? Activity
+      : (scenarioIcons[scenario.scenarioType] || Heart)
   const scenarioId = scenario.id
 
   const [callActive, setCallActive] = useState(false)
@@ -177,12 +199,14 @@ export default function LiveSimulationPage({
   }, [callActive])
 
   // Hint system
+  const hintActions =
+    scenarioPayload?.scenario?.expected_actions ?? scenario.expectedActions
   useEffect(() => {
     if (!callActive || !hintsEnabled) {
       setCurrentHint("")
       return
     }
-    const hints = scenario.expectedActions
+    const hints = hintActions
     let hintIdx = 0
     const interval = setInterval(() => {
       if (hintIdx < hints.length) {
@@ -199,9 +223,13 @@ export default function LiveSimulationPage({
       clearInterval(interval)
       clearTimeout(firstHint)
     }
-  }, [callActive, hintsEnabled, scenario.expectedActions])
+  }, [callActive, hintsEnabled, hintActions])
 
   const handleStartCall = async () => {
+    if (scenarioIdFromUrl === "generated" && !scenarioPayload) {
+      setApiError("Generated scenario not found. Please start again from the setup page.")
+      return
+    }
     setConnectionStatus("connecting")
     setWsError(false)
     setApiError(null)
@@ -210,8 +238,7 @@ export default function LiveSimulationPage({
     setConversationHistory([])
     setNotes([])
     try {
-      const scenarioInput = scenarioPayload ?? buildScenarioString(scenario)
-      const data = await generateCallAudio(scenarioInput)
+      const data = await generateCallAudio(scenarioForApi)
       setCallerAudioUrl(data.audioUrl)
       setTranscript([
         {
@@ -268,8 +295,7 @@ export default function LiveSimulationPage({
     setApiError(null)
     setApiLoading(true)
     try {
-      const scenarioInput = scenarioPayload ?? buildScenarioString(scenario)
-      const data = await interact(scenarioInput, message, conversationHistory)
+      const data = await interact(scenarioForApi, message, conversationHistory)
       setConversationHistory(data.conversationHistory)
       setCallerAudioUrl(data.audioUrl)
       setTranscript((prev) => [
@@ -304,8 +330,7 @@ export default function LiveSimulationPage({
     setApiError(null)
     setApiLoading(true)
     try {
-      const scenarioInput = scenarioPayload ?? buildScenarioString(scenario)
-      const data = await interact(scenarioInput, message, conversationHistory)
+      const data = await interact(scenarioForApi, message, conversationHistory)
       setConversationHistory(data.conversationHistory)
       setCallerAudioUrl(data.audioUrl)
       setTranscript((prev) => [
@@ -339,9 +364,8 @@ export default function LiveSimulationPage({
         r.onerror = () => reject(new Error("Failed to read recording"))
         r.readAsDataURL(blob)
       })
-      const scenarioInput = scenarioPayload ?? buildScenarioString(scenario)
       const data = await interactWithVoice(
-        scenarioInput,
+        scenarioForApi,
         base64,
         conversationHistory
       )
@@ -419,7 +443,10 @@ export default function LiveSimulationPage({
               <Button
                 onClick={handleStartCall}
                 className="gap-2"
-                disabled={connectionStatus === "connecting"}
+                disabled={
+                  connectionStatus === "connecting" ||
+                  (scenarioIdFromUrl === "generated" && !scenarioPayload)
+                }
               >
                 {connectionStatus === "connecting" ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -484,17 +511,27 @@ export default function LiveSimulationPage({
             <CardContent className="flex flex-col gap-4">
               {/* Scenario */}
               <div className="rounded-lg border bg-muted/50 p-3">
-                <div className="mb-2 flex items-center gap-2">
-                  <ScenarioIcon className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm font-medium text-foreground">
-                    {scenario.title}
-                  </span>
-                </div>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  Caller: {scenario.callerProfile.name},{" "}
-                  {scenario.callerProfile.age}y,{" "}
-                  {scenario.callerProfile.emotion}
-                </p>
+                {scenarioIdFromUrl === "generated" && !scenarioPayload ? (
+                  <p className="text-xs text-muted-foreground">
+                    No generated scenario in this session. Return to setup and use
+                    &quot;Generate scenario &amp; start&quot; to begin.
+                  </p>
+                ) : (
+                  <>
+                    <div className="mb-2 flex items-center gap-2">
+                      <ScenarioIcon className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm font-medium text-foreground">
+                        {scenarioPayload?.scenario?.title ?? scenario.title}
+                      </span>
+                    </div>
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      Caller:{" "}
+                      {scenarioPayload?.scenario?.caller_profile
+                        ? `${scenarioPayload.scenario.caller_profile.name}, ${scenarioPayload.scenario.caller_profile.age}y, ${scenarioPayload.scenario.caller_profile.emotion}`
+                        : `${scenario.callerProfile.name}, ${scenario.callerProfile.age}y, ${scenario.callerProfile.emotion}`}
+                    </p>
+                  </>
+                )}
               </div>
 
               {/* Connection */}
