@@ -2,6 +2,32 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Map popup: no white boundary — override MapLibre default content bg/padding and global * border */
+.sf-map-popup.maplibregl-popup {
+  background: transparent;
+  border: none;
+}
+.sf-map-popup.maplibregl-popup .maplibregl-popup-content {
+  background: transparent;
+  border: none;
+  padding: 0;
+  box-shadow: none;
+}
+.sf-map-popup.maplibregl-popup .maplibregl-popup-tip {
+  border: none;
+  background: transparent;
+}
+.sf-map-popup.maplibregl-popup .maplibregl-popup-close-button {
+  border: none;
+  background: transparent;
+  color: hsl(var(--foreground));
+  opacity: 0.8;
+  z-index: 1;
+}
+.sf-map-popup.maplibregl-popup .maplibregl-popup-close-button:hover {
+  opacity: 1;
+}
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;
