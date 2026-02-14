@@ -149,6 +149,8 @@ export function SFMap({
         "circle-opacity": ["case", ["get", "disabled"], 0.4, 0.98],
       }
 
+      type CirclePaint = maplibregl.CircleLayerSpecification["paint"]
+
       // Unselected: zoom must be top-level in interpolate (MapLibre requirement)
       map.addLayer({
         id: POINTS_LAYER_ID,
@@ -158,7 +160,7 @@ export function SFMap({
         paint: {
           ...paintBase,
           "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatRadius],
-        },
+        } as CirclePaint,
       })
 
       // Selected: same, separate layer so radius uses only top-level interpolate
@@ -170,7 +172,7 @@ export function SFMap({
         paint: {
           ...paintBase,
           "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatRadiusSelected],
-        },
+        } as CirclePaint,
       })
       setPointsLayerReady(true)
     }
