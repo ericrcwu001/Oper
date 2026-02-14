@@ -7,3 +7,7 @@ next-env.d.ts
 .env
 treehacks/backend/generated-audio/
 .cursor/
+
+# Simulated vehicle positions (runtime output)
+backend/data/vehicle-positions.json
+.pmtiles-cli/

@@ -45,7 +45,46 @@ import type {
   NoteEntry,
   Difficulty,
 } from "@/lib/types"
+import type { MapPoint } from "@/lib/map-types"
+import { SFMap } from "@/components/sf-map"
 import { cn } from "@/lib/utils"
+
+/** Initial map points with hardcoded popup data (no backend). */
+function getInitialMapPoints(): MapPoint[] {
+  return [
+    {
+      id: "call-1",
+      type: "911",
+      lat: 37.7749,
+      lng: -122.4194,
+      location: "2500 Mission St, SF",
+      description: "Cardiac arrest reported",
+      callerId: "CALL-001",
+      callerName: "Jane Doe",
+      timestamp: "14:32",
+    },
+    {
+      id: "unit-p1",
+      type: "police",
+      lat: 37.78,
+      lng: -122.41,
+      location: "Mission District",
+      officerInCharge: "Sgt. Smith",
+      unitId: "PD-12",
+      status: "En route",
+    },
+    {
+      id: "unit-f1",
+      type: "fire",
+      lat: 37.768,
+      lng: -122.43,
+      location: "SOMA",
+      officerInCharge: "Capt. Jones",
+      unitId: "FD-7",
+      status: "Standing by",
+    },
+  ]
+}
 
 const GENERATED_SCENARIO_STORAGE_KEY = "simulation-generated-scenario"
 
@@ -168,6 +207,8 @@ export default function LiveSimulationPage({
   const [apiLoading, setApiLoading] = useState(false)
   const [apiError, setApiError] = useState<string | null>(null)
   const [notes, setNotes] = useState<NoteEntry[]>([])
+  const [mapPoints, setMapPoints] = useState<MapPoint[]>(getInitialMapPoints)
+  const [selectedPointId, setSelectedPointId] = useState<string | null>(null)
   const [dispatchRecommendation, setDispatchRecommendation] = useState<{
     units: { unit: string; rationale?: string; severity?: string }[]
     severity: string
@@ -175,11 +216,35 @@ export default function LiveSimulationPage({
   } | null>(null)
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const tick30Ref = useRef<ReturnType<typeof setInterval> | null>(null)
+  const angleRef = useRef(0)
 
   // Simulated loading
   useEffect(() => {
     const t = setTimeout(() => setLoading(false), 1200)
     return () => clearTimeout(t)
+  }, [])
+
+  // 30 tps tick: update map points (animate police unit in small circle for live demo)
+  useEffect(() => {
+    const TICK_MS = 1000 / 30
+    tick30Ref.current = setInterval(() => {
+      setMapPoints((prev) => {
+        const base = getInitialMapPoints()
+        const police = base.find((p) => p.id === "unit-p1")
+        if (!police || police.type !== "police") return prev
+        angleRef.current += (2 * Math.PI * 0.2) / 30
+        const r = 0.003
+        const lat = 37.78 + r * Math.sin(angleRef.current)
+        const lng = -122.41 + r * Math.cos(angleRef.current)
+        return base.map((p) =>
+          p.id === "unit-p1" ? { ...p, lat, lng } : p
+        )
+      })
+    }, TICK_MS)
+    return () => {
+      if (tick30Ref.current) clearInterval(tick30Ref.current)
+    }
   }, [])
 
   // Call timer
@@ -516,6 +581,36 @@ export default function LiveSimulationPage({
             <span className="text-foreground"><span className="font-medium">Hint:</span> {currentHint}</span>
           </div>
         )}
+
+        {/* Map - full-width top row (from map/vehicle feature) */}
+        <Card className="mb-4 overflow-hidden border bg-card shrink-0">
+          <div className="relative h-[280px] min-h-[200px] w-full">
+            <SFMap
+              points={mapPoints}
+              selectedPointId={selectedPointId}
+              onSelectPoint={setSelectedPointId}
+              className="absolute inset-0 h-full w-full"
+            />
+            <div className="absolute bottom-3 left-3 z-10 flex gap-4 rounded-md border border-border/80 bg-card/95 px-3 py-2 text-xs shadow-sm backdrop-blur">
+              <span className="flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-full bg-[#EF4444]" aria-hidden />
+                911
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-full bg-[#3B82F6]" aria-hidden />
+                Police
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-full bg-[#F97316]" aria-hidden />
+                Fire
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-full bg-[#22C55E]" aria-hidden />
+                Ambulance
+              </span>
+            </div>
+          </div>
+        </Card>
 
         {/* Main: Left = transcript (main), Right = controls + notes + dispatch */}
         <div className="flex min-h-0 flex-1 flex-col gap-4 py-4 lg:flex-row">
