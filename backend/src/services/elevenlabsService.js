@@ -6,12 +6,12 @@ import { config } from '../config.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
- * Strip all leading speaker labels so TTS does not read them aloud.
- * Handles multiple occurrences (e.g. "[Caller] [Caller] Hello" -> "Hello").
+ * Strip all leading speaker labels (e.g. "[Caller]:", "[Caller] [Caller] ").
+ * Use before TTS and before returning text to the client so the user never sees/hears them.
  * @param {string} text
  * @returns {string}
  */
-function sanitizeForTts(text) {
+export function sanitizeCallerResponseText(text) {
   if (typeof text !== 'string') return '';
   return text
     .replace(/^\s*(\[?(?:Caller|Operator)\]?\s*:?\s*)+/i, '')
@@ -153,7 +153,7 @@ export async function textToSpeech(text, filename, voiceOptions) {
     );
   }
 
-  const cleanedText = sanitizeForTts(text);
+  const cleanedText = sanitizeCallerResponseText(text);
   const voiceId = resolveVoiceId(voiceOptions);
   const voiceSettings = resolveVoiceSettings(voiceOptions);
   const { modelId, outputFormat } = config.elevenlabs;
