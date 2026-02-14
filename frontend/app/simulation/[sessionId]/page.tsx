@@ -289,7 +289,7 @@ export default function LiveSimulationPage({
     setLatency(0)
   }, [callActive])
 
-  // Live eval: assess caller transcript for dispatch recommendations during the call
+  // Live eval: re-run dispatch assessment on every caller response (start call + each interact response)
   useEffect(() => {
     if (!callActive || conversationHistory.length === 0) {
       setDispatchRecommendation(null)
@@ -301,9 +301,11 @@ export default function LiveSimulationPage({
       .join(" ")
       .trim()
     if (!callerTranscript) return
+    let cancelled = false
     assessCallTranscript(callerTranscript)
-      .then(setDispatchRecommendation)
-      .catch(() => setDispatchRecommendation(null))
+      .then((res) => { if (!cancelled) setDispatchRecommendation(res) })
+      .catch(() => { if (!cancelled) setDispatchRecommendation(null) })
+    return () => { cancelled = true }
   }, [callActive, conversationHistory])
 
   // Hint system
