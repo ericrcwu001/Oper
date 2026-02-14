@@ -10,7 +10,6 @@ import vehiclesRouter from './routes/vehicles.js';
 import { startSimulation } from './services/vehicleSimulation.js';
 import callEvaluationRouter from './routes/callEvaluation.js';
 import crimesRouter from './routes/crimes.js';
-import { attachLiveEvalWebSocket } from './call-evaluation/websocket-handler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -45,12 +44,10 @@ app.use('/api/call-evaluation', callEvaluationRouter);
 app.use('/api/crimes', crimesRouter);
 
 const server = http.createServer(app);
-attachLiveEvalWebSocket(server);
 
 server.listen(config.port, () => {
   startSimulation();
   console.log(`911 call simulation backend running at http://localhost:${config.port}`);
-  console.log('WebSocket: ws://localhost:' + config.port + '/live-eval (live call evaluation)');
   console.log('POST /api/scenarios/generate with body: { "difficulty": "easy"|"medium"|"hard" }');
   console.log('POST /generate-call-audio with body: { "scenario": "..." }');
   console.log('POST /interact with body: { "scenario", "userInput" or "userInputAudio", optional "conversationHistory" }');

@@ -243,6 +243,8 @@ export default function LiveSimulationPage({
     severity: string
     critical?: boolean
     suggestedCount?: number
+    stage?: "preliminary" | "confirming" | "confirmed"
+    latestTrigger?: { rationale: string; severity: string }[]
   } | null>(null)
   const [isAssessingDispatch, setIsAssessingDispatch] = useState(false)
 
@@ -878,54 +880,98 @@ export default function LiveSimulationPage({
               />
             </Card>
 
-            {/* Dispatch (live evaluation) */}
+            {/* Dispatch (live evaluation) — LLM + RAG; show previous recommendations while analyzing with clear top strip */}
             <Card
               className={cn(
-                "shrink-0 border bg-card transition-shadow",
-                isAssessingDispatch && "shadow-sm ring-1 ring-primary/20"
+                "shrink-0 border bg-card transition-all relative overflow-hidden",
+                callActive && "ring-1 ring-primary/30",
+                isAssessingDispatch && "ring-primary/50 shadow-md"
               )}
             >
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center gap-2 text-sm font-medium">
-                  <Shield className="h-4 w-4 text-primary" />
-                  Dispatch recommendations
+              {callActive && isAssessingDispatch && (
+                <>
+                  <div
+                    className="absolute inset-0 pointer-events-none z-0 opacity-20"
+                    aria-hidden
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-primary/25 to-transparent animate-live-shimmer" />
+                  </div>
+                  <div className="relative z-10 border-b border-primary/30 bg-primary/10 px-3 py-2 flex items-center gap-2">
+                    <span className="inline-flex gap-1">
+                      <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:0ms]" />
+                      <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:150ms]" />
+                      <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:300ms]" />
+                    </span>
+                    <span className="text-xs font-semibold text-primary">LLM analyzing…</span>
+                    <div className="flex-1 h-1 rounded-full bg-primary/20 overflow-hidden ml-1">
+                      <div className="h-full w-1/3 rounded-full bg-primary animate-live-shimmer min-w-[60px]" />
+                    </div>
+                  </div>
+                </>
+              )}
+              <CardHeader className={cn("pb-2 relative z-10", isAssessingDispatch && "pt-2")}>
+                <CardTitle className="flex items-center justify-between gap-2 text-sm font-medium">
+                  <span className="flex items-center gap-2">
+                    <Shield className="h-4 w-4 text-primary" />
+                    Dispatch recommendations
+                  </span>
                   {callActive && (
-                    <span className="flex items-center gap-1.5 text-xs font-normal text-muted-foreground">
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-semibold uppercase tracking-wide",
+                        isAssessingDispatch
+                          ? "bg-primary/15 text-primary border border-primary/40"
+                          : "bg-green-500/15 text-green-700 dark:text-green-400 border border-green-500/40"
+                      )}
+                    >
                       <span
                         className={cn(
-                          "inline-flex h-1.5 w-1.5 rounded-full",
-                          isAssessingDispatch ? "animate-pulse bg-primary" : "bg-green-500"
+                          "h-2 w-2 rounded-full flex-shrink-0",
+                          isAssessingDispatch
+                            ? "bg-primary animate-live-pulse"
+                            : "bg-green-500 animate-live-pulse"
                         )}
-                        />
-                      {isAssessingDispatch ? (
-                        <span className="animate-pulse">Live analyzing…</span>
-                      ) : (
-                        "Live"
-                      )}
+                      />
+                      {isAssessingDispatch ? "Analyzing" : "Live"}
                     </span>
                   )}
                 </CardTitle>
               </CardHeader>
-              <CardContent className="pt-0">
+              <CardContent className="pt-0 relative z-10">
                 {!callActive ? (
                   <p className="text-xs text-muted-foreground">
                     Start a call to see live dispatch suggestions from the caller&apos;s words.
                   </p>
                 ) : isAssessingDispatch && !dispatchRecommendation ? (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span className="inline-flex gap-0.5">
-                      <span className="h-1 w-1 rounded-full bg-current animate-bounce [animation-delay:0ms]" />
-                      <span className="h-1 w-1 rounded-full bg-current animate-bounce [animation-delay:150ms]" />
-                      <span className="h-1 w-1 rounded-full bg-current animate-bounce [animation-delay:300ms]" />
-                    </span>
-                    Analyzing caller…
-                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Waiting for first analysis…
+                  </p>
                 ) : !dispatchRecommendation ? (
                   <p className="text-xs text-muted-foreground">
-                    Updates as the caller speaks. Keywords like &quot;fire&quot; or &quot;not breathing&quot; trigger suggestions.
+                    Updates as the caller speaks. The LLM analyzes each response to suggest units.
                   </p>
                 ) : (
-                  <div className="space-y-2">
+                  <div className={cn("space-y-2", isAssessingDispatch && "opacity-90")}>
+                    {isAssessingDispatch && (
+                      <p className="text-xs text-primary/80 font-medium">Updating with latest…</p>
+                    )}
+                    {dispatchRecommendation.stage && (
+                      <p className="text-xs font-medium text-muted-foreground capitalize">
+                        {dispatchRecommendation.stage === "preliminary" && "Preliminary — gathering info"}
+                        {dispatchRecommendation.stage === "confirming" && "Confirming — more context"}
+                        {dispatchRecommendation.stage === "confirmed" && "Confirmed"}
+                      </p>
+                    )}
+                    {dispatchRecommendation.latestTrigger && dispatchRecommendation.latestTrigger.length > 0 && (
+                      <div className="rounded-md bg-primary/10 border border-primary/20 p-1.5">
+                        <p className="text-xs font-medium text-primary mb-0.5">Just in:</p>
+                        <ul className="text-xs text-muted-foreground space-y-0.5">
+                          {dispatchRecommendation.latestTrigger.map((t, i) => (
+                            <li key={i}>{t.rationale}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                     {dispatchRecommendation.suggestedCount != null && (
                       <p className="text-xs font-medium text-foreground">
                         Suggest sending{" "}
