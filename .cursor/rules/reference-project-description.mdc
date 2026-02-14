@@ -1,0 +1,17 @@
+---
+description: Reference Project Description first to understand what we're building
+alwaysApply: true
+---
+
+# Reference Project Description
+
+For each prompt or task:
+
+1. **First read** `Project Description.md` (project root) to understand:
+   - What we're building (product overview, problem, solution)
+   - Key features and priorities
+   - Technical constraints and stack
+
+2. Use that context to inform your answers, code changes, and suggestions so they stay aligned with the project goals.
+
+3. If the user's request seems to conflict with or extend the PRD, call it out and suggest how to proceed.
