@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getPositions } from '../services/vehicleSimulation.js';
+import { getPositions, setActiveCrimes } from '../services/vehicleSimulation.js';
 
 const router = Router();
 
@@ -12,6 +12,17 @@ const router = Router();
  */
 router.get('/', (req, res) => {
   res.json(getPositions());
+});
+
+/**
+ * POST /api/vehicles/crimes
+ * Body: { crimes: [{ lat, lng }, ...] }
+ * Sets active crime locations so vehicles within range steer toward them (real movement along roads).
+ */
+router.post('/crimes', (req, res) => {
+  const crimes = req.body?.crimes;
+  setActiveCrimes(crimes);
+  res.json({ ok: true });
 });
 
 export default router;

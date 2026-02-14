@@ -37,4 +37,6 @@ export interface MapPoint {
   officerInCharge?: string
   unitId?: string
   status?: string
+  /** Optional scale for circle radius (e.g. 1.5 for pop-in effect). */
+  radiusScale?: number
 }

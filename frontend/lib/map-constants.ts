@@ -18,8 +18,18 @@ export const MAP_POINT_COLORS: Record<MapPointType, string> = {
   police: "#3B82F6",
   fire: "#F97316",
   ambulance: "#22C55E",
-  crime: "#FFFFFF",
+  crime: "#FCD34D", // Amber so crime dots stand out on dark map
 }
+
+/** Crime points: larger radius and visible stroke so they’re more apparent. */
+export const CRIME_POINT_RADIUS_BY_ZOOM: [number, number][] = [
+  [11, 6],
+  [14, 10],
+  [16, 14],
+]
+
+/** Stroke color for crime dots (high visibility). */
+export const CRIME_POINT_STROKE_COLOR = "#F97316"
 
 /** Outline color for points (matches map background). */
 export const MAP_POINT_OUTLINE_COLOR = "#0B0C0E"

@@ -13,6 +13,7 @@ import {
   MAP_POINT_OUTLINE_COLOR,
   MAP_POINT_RADIUS_BY_ZOOM,
   MAP_POINT_RADIUS_SELECTED_BY_ZOOM,
+  CRIME_POINT_STROKE_COLOR,
 } from "@/lib/map-constants"
 import { getSFMapStyle } from "@/lib/map-style"
 
@@ -36,6 +37,7 @@ function pointsToGeoJSON(points: MapPoint[]): GeoJSON.FeatureCollection {
         type: p.type,
         selected: p.selected ?? false,
         disabled: p.disabled ?? false,
+        radiusScale: p.radiusScale ?? 1,
       },
     })),
   }
@@ -104,16 +106,16 @@ export function SFMap({
     }
   }, [defaultCenter, defaultZoom])
 
-  // Add points source + layer after style loads
+  // Add points source + layer after style loads (style.load or load so we catch when map is ready)
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
 
-    const onStyleLoad = () => {
+    const addPointsLayer = () => {
       if (map.getSource(POINTS_SOURCE_ID)) return
 
-      const flatRadius = MAP_POINT_RADIUS_BY_ZOOM.flat()
-      const flatRadiusSelected = MAP_POINT_RADIUS_SELECTED_BY_ZOOM.flat()
+      const radiusByZoom = MAP_POINT_RADIUS_BY_ZOOM
+      const radiusSelectedByZoom = MAP_POINT_RADIUS_SELECTED_BY_ZOOM
       const withSelection = (pointsRef.current ?? []).map((p) => ({
         ...p,
         selected: p.id === (selectedPointIdRef.current ?? null),
@@ -122,6 +124,25 @@ export function SFMap({
         type: "geojson",
         data: pointsToGeoJSON(withSelection),
       })
+
+      // Zoom must be the input to a top-level interpolate only. Scale (radiusScale × crime 2×) applied in stop values.
+      const radiusScaleAndType = [
+        "*",
+        ["coalesce", ["get", "radiusScale"], 1],
+        ["case", ["==", ["get", "type"], "crime"], 2, 1],
+      ]
+      const radiusExpr = [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        ...radiusByZoom.flatMap(([z, r]) => [z, ["*", ...radiusScaleAndType.slice(1), r]]),
+      ]
+      const radiusSelectedExpr = [
+        "interpolate",
+        ["linear"],
+        ["zoom"],
+        ...radiusSelectedByZoom.flatMap(([z, r]) => [z, ["*", ...radiusScaleAndType.slice(1), r]]),
+      ]
 
       const paintBase = {
         "circle-color": [
@@ -144,12 +165,16 @@ export function SFMap({
             "#9ca3af",
           ],
         ],
-        "circle-stroke-width": 1.8,
-        "circle-stroke-color": MAP_POINT_OUTLINE_COLOR,
+        "circle-stroke-width": ["case", ["==", ["get", "type"], "crime"], 2.5, 1.8],
+        "circle-stroke-color": [
+          "case",
+          ["==", ["get", "type"], "crime"],
+          CRIME_POINT_STROKE_COLOR,
+          MAP_POINT_OUTLINE_COLOR,
+        ],
         "circle-opacity": ["case", ["get", "disabled"], 0.4, 0.98],
       }
 
-      // Unselected: zoom must be top-level in interpolate (MapLibre requirement)
       map.addLayer({
         id: POINTS_LAYER_ID,
         type: "circle",
@@ -157,11 +182,10 @@ export function SFMap({
         filter: ["!", ["get", "selected"]],
         paint: {
           ...paintBase,
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatRadius],
+          "circle-radius": radiusExpr,
         },
       })
 
-      // Selected: same, separate layer so radius uses only top-level interpolate
       map.addLayer({
         id: POINTS_LAYER_SELECTED_ID,
         type: "circle",
@@ -169,21 +193,23 @@ export function SFMap({
         filter: ["get", "selected"],
         paint: {
           ...paintBase,
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatRadiusSelected],
+          "circle-radius": radiusSelectedExpr,
         },
       })
       setPointsLayerReady(true)
     }
 
-    if (map.isStyleLoaded()) onStyleLoad()
-    else map.on("style.load", onStyleLoad)
+    if (map.isStyleLoaded()) addPointsLayer()
+    else map.on("style.load", addPointsLayer)
+    map.on("load", addPointsLayer)
 
     return () => {
-      map.off("style.load", onStyleLoad)
+      map.off("style.load", addPointsLayer)
+      map.off("load", addPointsLayer)
     }
   }, [])
 
-  // Sync points and selected state to GeoJSON source
+  // Sync points and selected state to GeoJSON source (run when points change or when layer becomes ready)
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
@@ -196,7 +222,7 @@ export function SFMap({
       selected: p.id === selectedPointId,
     }))
     source.setData(pointsToGeoJSON(withSelection))
-  }, [points, selectedPointId])
+  }, [points, selectedPointId, pointsLayerReady])
 
   const showPopup = useCallback(
     (point: MapPoint, lngLat: [number, number]) => {
@@ -286,6 +312,7 @@ export function SFMap({
     if (!map || !onSelectPoint || !pointsLayerReady) return
 
     const handleClick = (e: maplibregl.MapMouseEvent) => {
+      if (!map.getLayer(POINTS_LAYER_ID)) return
       const features = map.queryRenderedFeatures(e.point, {
         layers: [POINTS_LAYER_ID, POINTS_LAYER_SELECTED_ID],
       })
@@ -312,6 +339,7 @@ export function SFMap({
     if (!map || !pointsLayerReady) return
 
     const handleMouseMove = (e: maplibregl.MapMouseEvent) => {
+      if (!map.getLayer(POINTS_LAYER_ID)) return
       const features = map.queryRenderedFeatures(e.point, {
         layers: [POINTS_LAYER_ID, POINTS_LAYER_SELECTED_ID],
       })
