@@ -15,7 +15,7 @@ import { useState } from "react"
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/simulation", label: "Simulate", icon: Phone },
+  { href: "/simulation", label: "Call", icon: Phone },
 ]
 
 export function AppShell({ children }: { children: React.ReactNode }) {

@@ -213,7 +213,7 @@ export default function ReviewPage({
             <Button variant="outline" asChild className="gap-2">
               <Link href="/simulation">
                 <Plus className="h-4 w-4" />
-                New Scenario
+                New Call
               </Link>
             </Button>
             <Button asChild className="gap-2">
