@@ -232,7 +232,9 @@ export default function LiveSimulationPage({
     units: { unit: string; rationale?: string; severity?: string }[]
     severity: string
     critical?: boolean
+    suggestedCount?: number
   } | null>(null)
+  const [isAssessingDispatch, setIsAssessingDispatch] = useState(false)
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const tick30Ref = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -293,6 +295,7 @@ export default function LiveSimulationPage({
   useEffect(() => {
     if (!callActive || conversationHistory.length === 0) {
       setDispatchRecommendation(null)
+      setIsAssessingDispatch(false)
       return
     }
     const callerTranscript = conversationHistory
@@ -300,11 +303,25 @@ export default function LiveSimulationPage({
       .map((t) => t.content)
       .join(" ")
       .trim()
-    if (!callerTranscript) return
+    if (!callerTranscript) {
+      setIsAssessingDispatch(false)
+      return
+    }
     let cancelled = false
+    setIsAssessingDispatch(true)
     assessCallTranscript(callerTranscript)
-      .then((res) => { if (!cancelled) setDispatchRecommendation(res) })
-      .catch(() => { if (!cancelled) setDispatchRecommendation(null) })
+      .then((res) => {
+        if (!cancelled) {
+          setDispatchRecommendation(res)
+          setIsAssessingDispatch(false)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDispatchRecommendation(null)
+          setIsAssessingDispatch(false)
+        }
+      })
     return () => { cancelled = true }
   }, [callActive, conversationHistory])
 
@@ -756,11 +773,31 @@ export default function LiveSimulationPage({
             </Card>
 
             {/* Dispatch (live evaluation) */}
-            <Card className="shrink-0 border bg-card">
+            <Card
+              className={cn(
+                "shrink-0 border bg-card transition-shadow",
+                isAssessingDispatch && "shadow-sm ring-1 ring-primary/20"
+              )}
+            >
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-sm font-medium">
                   <Shield className="h-4 w-4 text-primary" />
                   Dispatch recommendations
+                  {callActive && (
+                    <span className="flex items-center gap-1.5 text-xs font-normal text-muted-foreground">
+                      <span
+                        className={cn(
+                          "inline-flex h-1.5 w-1.5 rounded-full",
+                          isAssessingDispatch ? "animate-pulse bg-primary" : "bg-green-500"
+                        )}
+                        />
+                      {isAssessingDispatch ? (
+                        <span className="animate-pulse">Live analyzing…</span>
+                      ) : (
+                        "Live"
+                      )}
+                    </span>
+                  )}
                 </CardTitle>
               </CardHeader>
               <CardContent className="pt-0">
@@ -768,12 +805,30 @@ export default function LiveSimulationPage({
                   <p className="text-xs text-muted-foreground">
                     Start a call to see live dispatch suggestions from the caller&apos;s words.
                   </p>
+                ) : isAssessingDispatch && !dispatchRecommendation ? (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span className="inline-flex gap-0.5">
+                      <span className="h-1 w-1 rounded-full bg-current animate-bounce [animation-delay:0ms]" />
+                      <span className="h-1 w-1 rounded-full bg-current animate-bounce [animation-delay:150ms]" />
+                      <span className="h-1 w-1 rounded-full bg-current animate-bounce [animation-delay:300ms]" />
+                    </span>
+                    Analyzing caller…
+                  </div>
                 ) : !dispatchRecommendation ? (
                   <p className="text-xs text-muted-foreground">
                     Updates as the caller speaks. Keywords like &quot;fire&quot; or &quot;not breathing&quot; trigger suggestions.
                   </p>
                 ) : (
                   <div className="space-y-2">
+                    {dispatchRecommendation.suggestedCount != null && (
+                      <p className="text-xs font-medium text-foreground">
+                        Suggest sending{" "}
+                        <span className="text-primary font-semibold">
+                          {dispatchRecommendation.suggestedCount} unit
+                          {dispatchRecommendation.suggestedCount !== 1 ? "s" : ""}
+                        </span>
+                      </p>
+                    )}
                     <p className="text-xs text-muted-foreground">
                       Severity:{" "}
                       <span

@@ -165,6 +165,34 @@ function severityRank(s) {
   return r[s] ?? 0;
 }
 
+/** Min transcript length (chars) before we suggest a specific unit count (keeps early suggestions broad). */
+const MIN_TRANSCRIPT_LENGTH_FOR_COUNT = 80;
+
+/**
+ * Infer suggested number of units from transcript (e.g. "two people down" -> 2).
+ * Returns null when transcript is short (broad suggestion) or no number detected.
+ * @param {string} transcript
+ * @returns {number | null}
+ */
+export function inferSuggestedCount(transcript) {
+  const text = (transcript || '').trim();
+  if (text.length < MIN_TRANSCRIPT_LENGTH_FOR_COUNT) return null;
+
+  const lower = text.toLowerCase();
+  // Explicit numbers / counts
+  if (/\b(one|single|just one|only one|a single)\s+(person|victim|patient|man|woman|guy|injured|down|hurt)/i.test(lower) ||
+      /\b(one|single)\s+(is|has been|got)\s+(hurt|injured|down)/i.test(lower)) return 1;
+  if (/\b(two|both|couple)\s+(people|persons|victims|patients|men|women|guys|injured|down|hurt)/i.test(lower) ||
+      /\b(two|both)\s+(are|have been|got)\s+(hurt|injured|down)/i.test(lower) ||
+      /\b2\s+(people|persons|victims|patients)/i.test(lower)) return 2;
+  if (/\b(three|three people|3\s+people)\s+(injured|down|hurt|people)/i.test(lower) ||
+      /\b(three|3)\s+(are|have been|got)\s+(hurt|injured|down)/i.test(lower)) return 3;
+  if (/\b(multiple|several|many|few|four|4|five|5)\s+(people|persons|victims|patients|injured|down)/i.test(lower) ||
+      /\b(multiple|several|many)\s+(victims|people|injured)/i.test(lower)) return 3;
+
+  return null;
+}
+
 /**
  * Deduplicate rationales by unit: one entry per unit, keeping the highest-severity rationale.
  * @param {Array<{ unit: UnitType, rationale: string, severity: string }>} rationales

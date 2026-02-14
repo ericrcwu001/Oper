@@ -243,6 +243,8 @@ export interface AssessCallTranscriptResponse {
   units: { unit: string; rationale?: string; severity?: string }[]
   severity: string
   critical?: boolean
+  /** Suggested number of units when inferred from transcript (e.g. "two people down" -> 2). */
+  suggestedCount?: number
 }
 
 /**
