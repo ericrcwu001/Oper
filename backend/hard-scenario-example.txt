@@ -1,72 +1,70 @@
 {
   "scenario": {
-    "id": "rare_suicidal_caller_001",
+    "id": "hard_suicidal_caller_001",
     "scenario_type": "suicidal-caller",
-    "title": "Suicidal Caller in Crisis",
-    "description": "A young adult is calling to express suicidal thoughts after a recent breakup. They are in a state of panic and emotional distress, struggling to provide clear information about their location or the specifics of their situation. The operator must calm them down and gather critical information to dispatch help effectively.",
+    "title": "Caller considering self-harm",
+    "description": "A young adult is calling 911 in a state of extreme emotional distress, expressing thoughts of self-harm. They are in a secluded area and may not be able to provide their exact location. The operator must navigate the caller's panic and guide them to safety while gathering critical information.",
     "caller_profile": {
-      "name": "Jordan Smith",
-      "age": 22,
-      "emotion": "overwhelmed",
-      "gender": "man",
-      "race": "Caucasian",
-      "other_relevant_details": "speaks English with a slight Midwestern accent, works as a barista"
+      "name": "Alex Johnson",
+      "age": 24,
+      "emotion": "panicked",
+      "gender": "non-binary",
+      "race": "Hispanic",
+      "other_relevant_details": "speaks rapidly, may mention feeling hopeless"
     },
     "critical_info": [
-      "current location",
-      "method of intended self-harm",
-      "any previous attempts",
-      "presence of friends or family nearby"
+      "current location is unclear",
+      "caller has access to sharp objects",
+      "caller has a history of depression",
+      "caller is currently alone"
     ],
     "expected_actions": [
-      "ask open-ended questions to calm the caller",
-      "repeat critical questions for clarity",
-      "provide reassurance and support",
-      "dispatch emergency services to the caller's location"
+      "calm the caller down",
+      "ask for their location",
+      "encourage them to put down any objects",
+      "keep the caller on the line until help arrives"
     ],
     "optional_complications": [
-      "caller may not know their exact location",
-      "caller may disconnect at any moment",
-      "caller may become increasingly agitated"
+      "caller may become incoherent",
+      "caller may express disbelief in getting help",
+      "caller might hang up if overwhelmed"
     ],
     "difficulty": "hard",
     "language": "en"
   },
   "persona": {
     "stability": 0.3,
-    "style": 0.7,
-    "speed": 1.15,
-    "voice_description": "panicked, breathless, non-binary, distressed tone"
+    "style": 0.5,
+    "speed": 1.2,
+    "voice_description": "panicked, breathless, non-binary, emotional tone"
   },
   "caller_script": [
-    "I can't take this anymore!",
-    "I just feel so lost...",
-    "I don't know what to do!"
+    "I don't know what to do! I just feel so lost...",
+    "I can't take it anymore! Please help me!",
+    "I'm really scared right now..."
   ],
-  "role_instruction": "You are Jordan, 22, calling 911 because you feel suicidal.",
-  "scenario_summary_for_agent": "The caller is in a crisis, expressing suicidal thoughts after a breakup. They are overwhelmed and struggling to communicate effectively. The operator must provide immediate support while gathering critical information for emergency services.",
+  "role_instruction": "You are Alex, 24, calling 911 because you are feeling suicidal.",
+  "scenario_summary_for_agent": "The caller is in a highly emotional state, expressing thoughts of self-harm. They may struggle to communicate clearly or provide their exact location. The operator needs to keep the caller engaged and calm while obtaining necessary information for dispatch.",
   "critical_info": [
-    "The caller is located at an apartment complex at the intersection of Main St and 2nd Ave.",
-    "They mention having a bottle of pills nearby.",
-    "They have never attempted suicide before but feel hopeless.",
-    "There are friends in the area who are unaware of the situation."
+    "The caller is in emotional distress and feels hopeless.",
+    "They mention having sharp objects nearby.",
+    "They have a history of depression that may affect their current state."
   ],
   "withheld_information": [
-    "The caller has locked themselves in their bathroom.",
-    "They are hesitant to mention they have been drinking.",
-    "The caller's phone battery is low."
+    "Details about their exact location or access to help.",
+    "Specific reasons for their distress or thoughts of self-harm.",
+    "Whether they have any supportive friends or family they can call."
   ],
-  "behavior_notes": "Caller is highly emotional; may need additional reassurance to share location and other specifics. They may repeat phrases out of panic.",
-  "dialogue_directions": "Speak in rapid bursts, frequent pauses, and emotional outbursts; may cry or become breathless.",
+  "behavior_notes": "Caller is highly emotional; operator may need to calmly repeat questions and provide reassurance before key facts are revealed.",
+  "dialogue_directions": "Respond in short, fragmented sentences; may cry or become incoherent; speak rapidly and erratically.",
   "response_behavior": [
-    "Respond to questions slowly, needing time to process.",
-    "May mumble or speak incoherently when very distressed.",
-    "Will likely fixate on feelings of despair."
+    "Reassure them before asking for their location.",
+    "Ask open-ended questions to allow them to express feelings."
   ],
-  "opening_line": "I don't want to live anymore!",
+  "opening_line": "I just don't want to be here anymore...",
   "do_not_say": [
-    "I'm just kidding.",
-    "I don't need help.",
-    "This is a joke."
+    "Everything will be fine.",
+    "Just calm down.",
+    "You should just think positively."
   ]
 }

@@ -1,12 +1,12 @@
 # Scenario Generator Output Schema
 
-This document describes the JSON output of the backend scenario generator (`scenario_generator.py`). Use it when building features that depend on generated scenarios—e.g. frontend scenario cards, voice/TTS agents (ElevenLabs Flash v2.5), or any system that consumes `POST /api/scenarios/generate` or `generate_scenario(difficulty)`.
+This document describes the JSON output of the backend scenario generator (`src/services/scenarioGenerator.js`). Use it when building features that depend on generated scenarios—e.g. frontend scenario cards, voice/TTS agents (ElevenLabs Flash v2.5), or any system that consumes `POST /api/scenarios/generate` or `generateScenario(difficulty)`.
 
 ---
 
 ## Overview
 
-- **Entry point:** `generate_scenario(difficulty)` where `difficulty` is `"easy"` | `"medium"` | `"hard"`.
+- **Entry point:** `generateScenario(difficulty)` (async) where `difficulty` is `"easy"` | `"medium"` | `"hard"`.
 - **API:** `POST /api/scenarios/generate` with body `{ "difficulty": "easy"|"medium"|"hard" }`.
 - **Output:** A single JSON object (dict). No streaming.
 - **Consumers:**
@@ -41,7 +41,7 @@ Used for UI and for building the “Caller personal details” section of the vo
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `id` | string | Yes | Unique scenario id. Generator may omit; backend sets `scenario-{uuid8}` if missing. |
-| `scenario_type` | string | Yes | E.g. `domestic-violence`, `suicidal-caller`, `cardiac-arrest`, `fire`, `traffic-accident`. Frontend may map to icons/labels. |
+| `scenario_type` | string | Yes | Scenario category. Language-difficulty / language-barrier scenarios are explicitly excluded. Easy: e.g. `cardiac-arrest`, `fire`, `traffic-accident`, `choking`, `lost-child`. Medium: e.g. `domestic-dispute`, `child-calling-for-parent`, `overdose`, `robbery-just-occurred`. Hard: e.g. `shooting-witness`, `active-shooter`, `domestic-violence`, `barricaded-subject`, `child-in-danger`, `hostage`, `mass-casualty`, `suicidal-caller`, `hoax-or-prank`. The backend may pass a specific scenario type per request to ensure diversity across easy, medium, and hard. Frontend may map to icons/labels. |
 | `title` | string | Yes | Short display title. |
 | `description` | string | Yes | 2–4 sentence scenario description. |
 | `caller_profile` | object | Yes | Caller identity and personal details (see below). |
@@ -85,7 +85,7 @@ These fields are serialized by `build_voice_agent_system_prompt(payload)` into t
 
 ### `role_instruction` (string)
 
-One short line defining the role, e.g. *"You are Jordan, 24, calling 911 as you feel suicidal and need help."*  
+One short line defining the role, e.g. *"You are Jordan, 24, calling 911 after witnessing a shooting. You are hiding and very shaken."*  
 → **Section:** `## Role`
 
 ### `scenario_summary_for_agent` (string)
@@ -157,24 +157,26 @@ Phrases or topics the caller would never say (stay in character), e.g. *"I'm an 
 
 ## Example Payload (minimal structure)
 
+Example uses `shooting-witness` (hard) for diversity; the generator rotates through many types per difficulty.
+
 ```json
 {
   "scenario": {
     "id": "hard-001",
-    "scenario_type": "suicidal-caller",
-    "title": "Desperate Call for Help",
-    "description": "A young adult calls 911 expressing hopelessness and suicidal thoughts.",
+    "scenario_type": "shooting-witness",
+    "title": "Witness to Shooting",
+    "description": "A caller just witnessed a shooting in a parking lot. They are hiding and may be in shock; the operator must get location, description of the shooter, and number of victims while keeping the caller calm.",
     "caller_profile": {
       "name": "Jordan",
       "age": 24,
-      "emotion": "despair",
+      "emotion": "panicked",
       "gender": "non-binary",
       "race": "Black",
       "other_relevant_details": "Southern accent, speaks in short bursts when upset"
     },
-    "critical_info": ["Caller is 24", "In bedroom", "Alone", "Feeling hopeless"],
-    "expected_actions": ["Reassure", "Ask about plan/means", "Keep engaged", "Dispatch"],
-    "optional_complications": ["May refuse address", "May hang up"],
+    "critical_info": ["Location of shooting", "Shooter description", "Caller's current location", "Number of victims visible"],
+    "expected_actions": ["Keep caller calm", "Get exact location", "Get shooter description", "Dispatch police and EMS"],
+    "optional_complications": ["Caller may freeze or hang up", "May misremember details"],
     "difficulty": "hard",
     "language": "en"
   },
@@ -184,15 +186,15 @@ Phrases or topics the caller would never say (stay in character), e.g. *"I'm an 
     "speed": 1.2,
     "voice_description": "young adult, Southern accent, emotional, distraught"
   },
-  "caller_script": ["I don't know what to do anymore.", "I just need someone to talk to."],
-  "role_instruction": "You are Jordan, 24, calling 911 as you feel suicidal and need help.",
-  "scenario_summary_for_agent": "Caller is 24, alone in bedroom, expressing suicidal thoughts. Operator must keep them engaged and dispatch help.",
-  "critical_info": ["Caller feels hopeless", "Alone in bedroom", "Heightened emotional state"],
-  "withheld_information": ["Has had thoughts about how they would do it (reveal only if operator asks about plan or means)"],
-  "behavior_notes": "Highly emotional; may need repeated reassurance. May become tearful or fixate on despair.",
+  "caller_script": ["Oh my god, someone just—they shot—", "I'm in the parking lot behind the mall."],
+  "role_instruction": "You are Jordan, 24, calling 911 after witnessing a shooting. You are hiding and very shaken.",
+  "scenario_summary_for_agent": "Caller witnessed a shooting in a parking lot, is hiding, and may be in shock. Operator must get location, shooter description, and victim count while keeping caller engaged.",
+  "critical_info": ["Parking lot behind the mall", "Saw one shooter, male", "At least one person down", "Caller is behind a car"],
+  "withheld_information": ["Shooter was wearing a red jacket (reveal if operator asks what they looked like)", "There might be a second person with the shooter"],
+  "behavior_notes": "Highly stressed; may need repeated prompts to give location. May cry or speak in fragments.",
   "dialogue_directions": "Use frequent fillers (um, uh), short fragmented sentences, occasional long pauses or trailing off. Match emotional intensity; may cry or speak in bursts.",
-  "response_behavior": ["Give location only after being asked at least once", "Answer questions about feelings if operator asks directly"],
-  "opening_line": "I don't know what to do anymore. I just—I need help.",
+  "response_behavior": ["Give location only after being asked at least once", "Give shooter description when operator asks what they looked like"],
+  "opening_line": "Oh my god, someone just shot—I don't know, there's someone on the ground—",
   "do_not_say": ["I'm an AI", "What's the script?", "This is a simulation"]
 }
 ```
@@ -201,4 +203,4 @@ Phrases or topics the caller would never say (stay in character), e.g. *"I'm an 
 
 ## Source of Truth
 
-The schema and prompt are defined in `backend/scenario_generator.py`: `SCENARIO_RESPONSE_SCHEMA`, `SYSTEM_PROMPT`, and `build_voice_agent_system_prompt()`. If you add or change fields, update this document and the generator code together.
+The schema and prompt are defined in `backend/src/services/scenarioGenerator.js`: `SYSTEM_PROMPT`, `generateScenario()`, and `buildVoiceAgentSystemPrompt()`. If you add or change fields, update this document and the generator code together.
