@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { Mic, MicOff, Hand } from "lucide-react"
+import { useState, useRef, useCallback } from "react"
+import { Mic, MicOff, Hand, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
@@ -9,15 +9,115 @@ import { cn } from "@/lib/utils"
 
 interface MicControlProps {
   disabled?: boolean
+  /** Called with the recorded audio blob when the user finishes speaking (PTT release or hands-free stop). */
+  onRecordingComplete?: (blob: Blob) => void
+  /** When true, show a loading state (e.g. while backend is processing voice). */
+  sending?: boolean
 }
 
-export function MicControl({ disabled }: MicControlProps) {
+export function MicControl({
+  disabled,
+  onRecordingComplete,
+  sending = false,
+}: MicControlProps) {
   const [ptt, setPtt] = useState(false)
   const [handsFree, setHandsFree] = useState(false)
+  const [level, setLevel] = useState(0)
+  const [error, setError] = useState<string | null>(null)
+
+  const streamRef = useRef<MediaStream | null>(null)
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const chunksRef = useRef<Blob[]>([])
+  const startTimeRef = useRef<number>(0)
+  const MIN_RECORDING_MS = 500
+
   const active = ptt || handsFree
 
-  // Mock input level
-  const level = active ? 65 : 0
+  const stopRecording = useCallback(() => {
+    const recorder = recorderRef.current
+    if (!recorder || recorder.state === "inactive") return
+    recorder.stop()
+    recorderRef.current = null
+    streamRef.current?.getTracks().forEach((t) => t.stop())
+    streamRef.current = null
+    setLevel(0)
+  }, [])
+
+  const startRecording = useCallback(async () => {
+    if (disabled || sending) return
+    setError(null)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      streamRef.current = stream
+
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : "audio/webm"
+      const recorder = new MediaRecorder(stream)
+      chunksRef.current = []
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data)
+      }
+      recorder.onstop = () => {
+        const duration = Date.now() - startTimeRef.current
+        if (chunksRef.current.length === 0 || duration < MIN_RECORDING_MS) return
+        const blob = new Blob(chunksRef.current, { type: mimeType })
+        onRecordingComplete?.(blob)
+      }
+      recorder.onerror = () => setError("Recording failed")
+
+      startTimeRef.current = Date.now()
+      recorder.start(100)
+      recorderRef.current = recorder
+
+      // Simple level meter: use AudioContext + AnalyserNode (optional, can be noisy)
+      try {
+        const ac = new AudioContext()
+        const source = ac.createMediaStreamSource(stream)
+        const analyser = ac.createAnalyser()
+        analyser.fftSize = 256
+        source.connect(analyser)
+        const data = new Uint8Array(analyser.frequencyBinCount)
+
+        const tick = () => {
+          if (recorderRef.current?.state !== "recording") return
+          analyser.getByteFrequencyData(data)
+          const avg = data.reduce((a, b) => a + b, 0) / data.length
+          setLevel(Math.min(100, Math.round((avg / 128) * 100)))
+          requestAnimationFrame(tick)
+        }
+        tick()
+      } catch {
+        setLevel(50)
+      }
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Microphone access denied"
+      )
+    }
+  }, [disabled, sending, onRecordingComplete])
+
+  const handlePtTDown = () => {
+    if (handsFree) return
+    setPtt(true)
+    startRecording()
+  }
+
+  const handlePtTUp = () => {
+    setPtt(false)
+    if (!handsFree) stopRecording()
+  }
+
+  const handleHandsFreeChange = (checked: boolean) => {
+    if (checked) {
+      setHandsFree(true)
+      startRecording()
+    } else {
+      setHandsFree(false)
+      stopRecording()
+    }
+  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -25,35 +125,54 @@ export function MicControl({ disabled }: MicControlProps) {
         <Button
           variant={active ? "default" : "outline"}
           size="sm"
-          disabled={disabled || handsFree}
-          onMouseDown={() => setPtt(true)}
-          onMouseUp={() => setPtt(false)}
-          onMouseLeave={() => setPtt(false)}
-          className="gap-2"
+          disabled={disabled || sending}
+          onMouseDown={handlePtTDown}
+          onMouseUp={handlePtTUp}
+          onMouseLeave={handlePtTUp}
+          onTouchStart={(e) => {
+            e.preventDefault()
+            handlePtTDown()
+          }}
+          onTouchEnd={(e) => {
+            e.preventDefault()
+            handlePtTUp()
+          }}
+          className="gap-2 touch-none select-none"
           aria-label="Push to talk"
         >
-          {active ? (
+          {sending ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : active ? (
             <Mic className="h-4 w-4" />
           ) : (
             <MicOff className="h-4 w-4" />
           )}
-          {handsFree ? "Listening" : "Push to Talk"}
+          {sending
+            ? "Sending..."
+            : handsFree
+              ? "Listening"
+              : "Push to Talk"}
         </Button>
         <div className="flex items-center gap-2">
           <Switch
             id="hands-free"
             checked={handsFree}
-            onCheckedChange={setHandsFree}
-            disabled={disabled}
+            onCheckedChange={handleHandsFreeChange}
+            disabled={disabled || sending}
             aria-label="Toggle hands-free mode"
           />
-          <Label htmlFor="hands-free" className="flex items-center gap-1 text-xs text-muted-foreground">
+          <Label
+            htmlFor="hands-free"
+            className="flex items-center gap-1 text-xs text-muted-foreground"
+          >
             <Hand className="h-3 w-3" />
             Hands-free
           </Label>
         </div>
       </div>
-      {/* Mock input level meter */}
+      {error && (
+        <p className="text-xs text-destructive">{error}</p>
+      )}
       <div className="flex items-center gap-2">
         <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
           Level
