@@ -75,11 +75,10 @@ export default function SimulationSetupPage() {
       <div className="mx-auto max-w-7xl px-4 py-10 lg:px-6">
         <div className="mb-8">
           <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
-            Scenario Setup
+            Call Setup
           </h1>
           <p className="mt-2 text-muted-foreground">
-            Choose difficulty and we’ll generate a unique emergency scenario for
-            your call simulation.
+            Choose the difficulty of call you want to take.
           </p>
         </div>
 
@@ -88,10 +87,10 @@ export default function SimulationSetupPage() {
             <Card className="border bg-card">
               <CardContent className="pt-6">
                 <p className="text-muted-foreground">
-                  When you start, the app will generate a new scenario (e.g.
+                  When you start, we'll connect you to a new emergency call (e.g.
                   cardiac arrest, fire, traffic accident, domestic dispute)
-                  tailored to your chosen difficulty. The AI caller will behave
-                  according to that scenario during the simulation.
+                  based on your chosen difficulty. The AI caller will respond as
+                  they would during a real call.
                 </p>
               </CardContent>
             </Card>
@@ -107,7 +106,7 @@ export default function SimulationSetupPage() {
               </CardHeader>
               <CardContent className="flex flex-col gap-5">
                 <div className="flex flex-col gap-2">
-                  <Label htmlFor="difficulty">Difficulty</Label>
+                  <Label htmlFor="difficulty">Call Difficulty</Label>
                   <Select
                     value={difficulty}
                     onValueChange={(v) => setDifficulty(v as Difficulty)}
@@ -169,11 +168,11 @@ export default function SimulationSetupPage() {
                   {loading ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Generating scenario…
+                      Generating call…
                     </>
                   ) : (
                     <>
-                      Start Simulation
+                      Start Call
                       <ArrowRight className="h-4 w-4" />
                     </>
                   )}
@@ -197,7 +196,7 @@ export default function SimulationSetupPage() {
                   ) : (
                     <Sparkles className="h-4 w-4" />
                   )}
-                  {generateLoading ? "Generating scenario..." : "Generate scenario & start"}
+                  {generateLoading ? "Generating call..." : "Generate call & start"}
                 </Button>
               </CardContent>
             </Card>
