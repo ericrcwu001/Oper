@@ -26,12 +26,14 @@ import {
   HelpCircle,
   Loader2,
   AlertCircle,
+  Shield,
 } from "lucide-react"
 import { scenarios } from "@/lib/mock-data"
 import {
   generateCallAudio,
   interact,
   interactWithVoice,
+  assessCallTranscript,
   type GeneratedScenarioPayload,
   type CallScenarioInput,
 } from "@/lib/api"
@@ -166,6 +168,11 @@ export default function LiveSimulationPage({
   const [apiLoading, setApiLoading] = useState(false)
   const [apiError, setApiError] = useState<string | null>(null)
   const [notes, setNotes] = useState<NoteEntry[]>([])
+  const [dispatchRecommendation, setDispatchRecommendation] = useState<{
+    units: { unit: string; rationale?: string; severity?: string }[]
+    severity: string
+    critical?: boolean
+  } | null>(null)
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -197,6 +204,23 @@ export default function LiveSimulationPage({
     }
     setLatency(0)
   }, [callActive])
+
+  // Live eval: assess caller transcript for dispatch recommendations during the call
+  useEffect(() => {
+    if (!callActive || conversationHistory.length === 0) {
+      setDispatchRecommendation(null)
+      return
+    }
+    const callerTranscript = conversationHistory
+      .filter((t) => t.role === "caller")
+      .map((t) => t.content)
+      .join(" ")
+      .trim()
+    if (!callerTranscript) return
+    assessCallTranscript(callerTranscript)
+      .then(setDispatchRecommendation)
+      .catch(() => setDispatchRecommendation(null))
+  }, [callActive, conversationHistory])
 
   // Hint system
   const hintActions =
@@ -264,6 +288,7 @@ export default function LiveSimulationPage({
     setPartialText("")
     setCallerAudioUrl(null)
     setConversationHistory([])
+    setDispatchRecommendation(null)
     try {
       sessionStorage.setItem(
         `simulation-transcript-${sessionId}`,
@@ -418,31 +443,38 @@ export default function LiveSimulationPage({
 
   return (
     <AppShell>
-      <div className="mx-auto max-w-7xl px-4 py-4 lg:px-6 lg:py-6">
-        {/* Header */}
-        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-foreground sm:text-2xl">
-              Live Call
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              Session {sessionId}
-            </p>
+      <div className="flex h-[calc(100vh-3.5rem)] flex-col px-4 lg:px-6">
+        {/* Compact header */}
+        <div className="flex shrink-0 items-center justify-between gap-4 border-b py-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <h1 className="text-lg font-semibold text-foreground">Live Call</h1>
+            <span className="text-xs text-muted-foreground">Session {sessionId}</span>
+            {scenarioPayload?.scenario?.title ?? scenario.title ? (
+              <span className="truncate text-sm text-muted-foreground">
+                — {scenarioPayload?.scenario?.title ?? scenario.title}
+              </span>
+            ) : null}
           </div>
-          <div className="flex items-center gap-2">
-            {connectionStatus === "connected" && (
-              <Badge
-                variant="outline"
-                className="border-accent/30 bg-accent/10 text-accent gap-1.5"
-              >
-                <Activity className="h-3 w-3 animate-pulse" />
-                Streaming
-              </Badge>
+          <div className="flex shrink-0 items-center gap-3">
+            {callActive && (
+              <>
+                <span className="flex items-center gap-1.5 text-sm font-mono text-muted-foreground">
+                  <Clock className="h-3.5 w-3.5" />
+                  {formatTime(callSeconds)}
+                </span>
+                {connectionStatus === "connected" && (
+                  <Badge variant="outline" className="border-accent/30 bg-accent/10 text-accent text-xs">
+                    <Activity className="h-3 w-3 animate-pulse" />
+                    Live
+                  </Badge>
+                )}
+              </>
             )}
             {!callActive ? (
               <Button
                 onClick={handleStartCall}
-                className="gap-2"
+                size="sm"
+                className="gap-1.5"
                 disabled={
                   connectionStatus === "connecting" ||
                   (scenarioIdFromUrl === "generated" && !scenarioPayload)
@@ -453,16 +485,10 @@ export default function LiveSimulationPage({
                 ) : (
                   <Phone className="h-4 w-4" />
                 )}
-                {connectionStatus === "connecting"
-                  ? "Connecting..."
-                  : "Start Call"}
+                {connectionStatus === "connecting" ? "Connecting..." : "Start Call"}
               </Button>
             ) : (
-              <Button
-                variant="destructive"
-                onClick={handleEndCall}
-                className="gap-2"
-              >
+              <Button variant="destructive" size="sm" onClick={handleEndCall} className="gap-1.5">
                 <PhoneOff className="h-4 w-4" />
                 End Call
               </Button>
@@ -470,195 +496,149 @@ export default function LiveSimulationPage({
           </div>
         </div>
 
-        {/* API / connection errors */}
+        {/* Errors */}
         {(wsError || apiError) && (
-          <div className="mb-4 flex items-center gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          <div className="flex shrink-0 items-center gap-3 border-b border-destructive/30 bg-destructive/5 px-4 py-2 text-sm text-destructive">
             <AlertCircle className="h-4 w-4 shrink-0" />
-            <span>{apiError ?? "WebSocket disconnected."}</span>
+            <span className="flex-1">{apiError ?? "WebSocket disconnected."}</span>
             {!callActive && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setWsError(false)
-                  setApiError(null)
-                  handleStartCall()
-                }}
-              >
+              <Button size="sm" variant="outline" onClick={() => { setWsError(false); setApiError(null); handleStartCall(); }}>
                 Retry
               </Button>
             )}
           </div>
         )}
 
-        {/* Hint bar */}
+        {/* Hint */}
         {currentHint && hintsEnabled && callActive && (
-          <div className="mb-4 flex items-center gap-2 rounded-lg border border-primary/20 bg-primary/5 px-4 py-2.5 text-sm">
+          <div className="flex shrink-0 items-center gap-2 border-b border-primary/20 bg-primary/5 px-4 py-2 text-sm">
             <HelpCircle className="h-4 w-4 shrink-0 text-primary" />
-            <span className="text-foreground">
-              <span className="font-medium">Hint:</span> {currentHint}
-            </span>
+            <span className="text-foreground"><span className="font-medium">Hint:</span> {currentHint}</span>
           </div>
         )}
 
-        {/* 3-column layout */}
-        <div className="grid gap-4 lg:grid-cols-[280px_1fr_280px]">
-          {/* Left - Call Status */}
-          <Card className="border bg-card">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm">Call Status</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-4">
-              {/* Scenario */}
-              <div className="rounded-lg border bg-muted/50 p-3">
-                {scenarioIdFromUrl === "generated" && !scenarioPayload ? (
-                  <p className="text-xs text-muted-foreground">
-                    No generated call in this session. Return to setup and use
-                    &quot;Generate call &amp; start&quot; to begin.
-                  </p>
-                ) : (
-                  <>
-                    <div className="mb-2 flex items-center gap-2">
-                      <ScenarioIcon className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-sm font-medium text-foreground">
-                        {scenarioPayload?.scenario?.title ?? scenario.title}
-                      </span>
-                    </div>
-                    <p className="text-xs leading-relaxed text-muted-foreground">
-                      Caller:{" "}
-                      {scenarioPayload?.scenario?.caller_profile
-                        ? `${scenarioPayload.scenario.caller_profile.name}, ${scenarioPayload.scenario.caller_profile.age}y, ${scenarioPayload.scenario.caller_profile.emotion}`
-                        : `${scenario.callerProfile.name}, ${scenario.callerProfile.age}y, ${scenario.callerProfile.emotion}`}
-                    </p>
-                  </>
-                )}
-              </div>
-
-              {/* Connection */}
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Connection</span>
-                <div className="flex items-center gap-1.5">
-                  {connectionStatus === "connected" ? (
-                    <>
-                      <Wifi className="h-3.5 w-3.5 text-accent" />
-                      <span className="text-accent">Connected</span>
-                    </>
-                  ) : connectionStatus === "connecting" ? (
-                    <>
-                      <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--warning))]" />
-                      <span className="text-[hsl(var(--warning))]">
-                        Connecting
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <WifiOff className="h-3.5 w-3.5 text-muted-foreground" />
-                      <span className="text-muted-foreground">
-                        Disconnected
-                      </span>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {/* Timer */}
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Call Timer</span>
-                <div className="flex items-center gap-1.5 font-mono">
-                  <Clock className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className={cn(callActive && "text-foreground")}>
-                    {formatTime(callSeconds)}
-                  </span>
-                </div>
-              </div>
-
-              {/* Latency */}
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Latency</span>
-                <span className="font-mono text-muted-foreground">
-                  {latency > 0 ? `${latency}ms` : "--"}
-                </span>
-              </div>
-
-              {/* Audio Controls */}
-              <div className="border-t pt-4">
-                <p className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Caller Audio
+        {/* Main: Left = transcript (main), Right = controls + notes + dispatch */}
+        <div className="flex min-h-0 flex-1 flex-col gap-4 py-4 lg:flex-row">
+          {/* Left — Live transcription (main) */}
+          <div className="flex min-h-[240px] min-w-0 flex-1 flex-col lg:min-h-0">
+            <Card className="flex min-h-0 flex-1 flex-col border bg-card overflow-hidden">
+              <CardHeader className="shrink-0 border-b py-3">
+                <CardTitle className="text-base font-medium">Live transcription</CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  Caller and operator — scroll to see full conversation
                 </p>
-                <AudioControl
-                  audioUrl={callerAudioUrl}
-                  disabled={!callActive}
-                />
+              </CardHeader>
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <TranscriptFeed turns={transcript} partialText={partialText} />
               </div>
+            </Card>
+          </div>
 
-              <div className="border-t pt-4">
-                <p className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Microphone
-                </p>
-                <MicControl
-                  disabled={!callActive}
-                  onRecordingComplete={handleVoiceRecordingComplete}
-                  sending={apiLoading}
-                />
-              </div>
-            </CardContent>
-          </Card>
+          {/* Right — Compact controls, operator notes, dispatch */}
+          <div className="flex min-h-0 w-full shrink-0 flex-col gap-3 overflow-y-auto lg:min-h-0 lg:w-[360px]">
+            {/* Controls: compact row(s) */}
+            <Card className="shrink-0 border bg-card">
+              <CardContent className="space-y-3 py-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Audio</span>
+                    <AudioControl audioUrl={callerAudioUrl} disabled={!callActive} />
+                  </div>
+                  <MicControl
+                    disabled={!callActive}
+                    onRecordingComplete={handleVoiceRecordingComplete}
+                    sending={apiLoading}
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Type message..."
+                    value={textInput}
+                    onChange={(e) => setTextInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") handleSendText() }}
+                    disabled={!callActive}
+                    className="h-8 text-sm"
+                  />
+                  <Button
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
+                    onClick={handleSendText}
+                    disabled={!callActive || !textInput.trim() || apiLoading}
+                    aria-label="Send"
+                  >
+                    {apiLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 shrink-0 gap-1 px-2"
+                    onClick={handleRequestClarification}
+                    disabled={!callActive || apiLoading}
+                    title="Request clarification"
+                  >
+                    <HelpCircle className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
 
-          {/* Center - Transcript */}
-          <Card className="flex flex-col border bg-card">
-            <CardHeader className="shrink-0 border-b pb-3">
-              <CardTitle className="text-sm">Conversation</CardTitle>
-            </CardHeader>
-            <div className="min-h-0 flex-1" style={{ height: "420px" }}>
-              <TranscriptFeed turns={transcript} partialText={partialText} />
-            </div>
-            {/* Sticky fallback input */}
-            <div className="shrink-0 border-t p-3">
-              <div className="flex gap-2">
-                <Input
-                  placeholder="Send text (fallback)..."
-                  value={textInput}
-                  onChange={(e) => setTextInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleSendText()
-                  }}
-                  disabled={!callActive}
-                  className="text-sm"
-                />
-                <Button
-                  size="icon"
-                  onClick={handleSendText}
-                  disabled={!callActive || !textInput.trim() || apiLoading}
-                  aria-label="Send message"
-                >
-                  {apiLoading ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Send className="h-4 w-4" />
-                  )}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleRequestClarification}
-                  disabled={!callActive || apiLoading}
-                  className="shrink-0 gap-1 text-xs"
-                >
-                  <HelpCircle className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">Clarify</span>
-                </Button>
-              </div>
-            </div>
-          </Card>
-
-          {/* Right - Notes */}
-          <Card className="flex flex-col border bg-card" style={{ height: "560px" }}>
-            <NotesPanel
+            {/* Operator notes — main space for dispatcher */}
+            <Card className="flex min-h-0 flex-1 flex-col border bg-card overflow-hidden">
+              <NotesPanel
                 callSeconds={callSeconds}
                 notes={notes}
                 onAddNote={(entry) => setNotes((prev) => [...prev, entry])}
               />
-          </Card>
+            </Card>
+
+            {/* Dispatch (live evaluation) */}
+            <Card className="shrink-0 border bg-card">
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-sm font-medium">
+                  <Shield className="h-4 w-4 text-primary" />
+                  Dispatch recommendations
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0">
+                {!callActive ? (
+                  <p className="text-xs text-muted-foreground">
+                    Start a call to see live dispatch suggestions from the caller&apos;s words.
+                  </p>
+                ) : !dispatchRecommendation ? (
+                  <p className="text-xs text-muted-foreground">
+                    Updates as the caller speaks. Keywords like &quot;fire&quot; or &quot;not breathing&quot; trigger suggestions.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">
+                      Severity:{" "}
+                      <span
+                        className={cn(
+                          "font-medium",
+                          dispatchRecommendation.severity === "critical" && "text-red-500",
+                          dispatchRecommendation.severity === "high" && "text-orange-500",
+                          dispatchRecommendation.severity === "medium" && "text-yellow-500"
+                        )}
+                      >
+                        {dispatchRecommendation.severity}
+                        {dispatchRecommendation.critical && " (critical)"}
+                      </span>
+                    </p>
+                    <ul className="list-inside list-disc space-y-1 text-xs">
+                      {dispatchRecommendation.units.map((u, i) => (
+                        <li key={i}>
+                          <span className="font-medium">{u.unit}</span>
+                          {u.rationale && (
+                            <span className="text-muted-foreground"> — {u.rationale}</span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </div>
     </AppShell>
