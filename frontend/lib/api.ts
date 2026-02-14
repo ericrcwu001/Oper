@@ -6,6 +6,14 @@ const API_BASE =
     ? process.env.NEXT_PUBLIC_API_URL
     : "http://localhost:3001"
 
+/** WebSocket URL for live call evaluation (same host/port as API, path /live-eval). */
+export function getLiveEvalWsUrl(): string {
+  const base = typeof process !== "undefined" && process.env?.NEXT_PUBLIC_API_URL
+    ? process.env.NEXT_PUBLIC_API_URL
+    : "http://localhost:3001"
+  return base.replace(/^http/, "ws") + "/live-eval"
+}
+
 export interface GenerateCallAudioResponse {
   audioUrl: string
   transcript: string
@@ -191,4 +199,32 @@ export async function evaluateCall(
     throw new Error((err as { error?: string }).error ?? "Evaluation failed")
   }
   return res.json() as Promise<Evaluation>
+}
+
+/** Response from POST /api/call-evaluation/assess (dispatch recommendations from transcript). */
+export interface AssessCallTranscriptResponse {
+  units: { unit: string; rationale?: string; severity?: string }[]
+  severity: string
+  critical?: boolean
+}
+
+/**
+ * Get dispatch recommendations from caller transcript (used during simulation).
+ * POST /api/call-evaluation/assess
+ */
+export async function assessCallTranscript(
+  transcript: string
+): Promise<AssessCallTranscriptResponse> {
+  const res = await fetch(`${API_BASE}/api/call-evaluation/assess`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ transcript }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(
+      (err as { error?: string }).error ?? "Assessment failed"
+    )
+  }
+  return res.json() as Promise<AssessCallTranscriptResponse>
 }
