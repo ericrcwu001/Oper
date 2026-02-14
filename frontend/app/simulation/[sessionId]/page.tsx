@@ -28,7 +28,12 @@ import {
   AlertCircle,
 } from "lucide-react"
 import { scenarios } from "@/lib/mock-data"
-import { generateCallAudio, interact, interactWithVoice } from "@/lib/api"
+import {
+  generateCallAudio,
+  interact,
+  interactWithVoice,
+  type GeneratedScenarioPayload,
+} from "@/lib/api"
 import type {
   TranscriptTurn,
   ConnectionStatus,
@@ -37,6 +42,8 @@ import type {
   NoteEntry,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
+
+const GENERATED_SCENARIO_STORAGE_KEY = "simulation-generated-scenario"
 
 function buildScenarioPayload(scenario: Scenario): {
   scenarioDescription: string
@@ -71,8 +78,31 @@ export default function LiveSimulationPage({
   const scenarioId = searchParams.get("scenario") || "scenario-1"
   const hintsEnabled = searchParams.get("hints") === "true"
 
-  const scenario = scenarios.find((s) => s.id === scenarioId) || scenarios[0]
-  const ScenarioIcon = scenarioIcons[scenario.scenarioType] || Heart
+  const [generatedScenario, setGeneratedScenario] =
+    useState<GeneratedScenarioPayload | null>(null)
+
+  const staticScenario = scenarios.find((s) => s.id === scenarioId) || scenarios[0]
+  const scenario = staticScenario
+  const ScenarioIcon =
+    scenarioId === "generated"
+      ? Activity
+      : (scenarioIcons[scenario.scenarioType] || Heart)
+
+  // Load generated scenario from sessionStorage when scenario=generated
+  useEffect(() => {
+    if (scenarioId !== "generated") return
+    try {
+      const raw = sessionStorage.getItem(
+        `${GENERATED_SCENARIO_STORAGE_KEY}-${sessionId}`
+      )
+      if (raw) {
+        const payload = JSON.parse(raw) as GeneratedScenarioPayload
+        setGeneratedScenario(payload)
+      }
+    } catch {
+      // ignore parse errors
+    }
+  }, [sessionId, scenarioId])
 
   const [callActive, setCallActive] = useState(false)
   const [callSeconds, setCallSeconds] = useState(0)
@@ -124,12 +154,14 @@ export default function LiveSimulationPage({
   }, [callActive])
 
   // Hint system
+  const hintActions =
+    generatedScenario?.scenario?.expected_actions ?? scenario.expectedActions
   useEffect(() => {
     if (!callActive || !hintsEnabled) {
       setCurrentHint("")
       return
     }
-    const hints = scenario.expectedActions
+    const hints = hintActions
     let hintIdx = 0
     const interval = setInterval(() => {
       if (hintIdx < hints.length) {
@@ -146,9 +178,15 @@ export default function LiveSimulationPage({
       clearInterval(interval)
       clearTimeout(firstHint)
     }
-  }, [callActive, hintsEnabled, scenario.expectedActions])
+  }, [callActive, hintsEnabled, hintActions])
+
+  const scenarioForApi = generatedScenario ?? buildScenarioPayload(scenario)
 
   const handleStartCall = async () => {
+    if (scenarioId === "generated" && !generatedScenario) {
+      setApiError("Generated scenario not found. Please start again from the setup page.")
+      return
+    }
     setConnectionStatus("connecting")
     setWsError(false)
     setApiError(null)
@@ -157,8 +195,7 @@ export default function LiveSimulationPage({
     setConversationHistory([])
     setNotes([])
     try {
-      const scenarioPayload = buildScenarioPayload(scenario)
-      const data = await generateCallAudio(scenarioPayload)
+      const data = await generateCallAudio(scenarioForApi)
       setCallerAudioUrl(data.audioUrl)
       setTranscript([
         {
@@ -215,8 +252,7 @@ export default function LiveSimulationPage({
     setApiError(null)
     setApiLoading(true)
     try {
-      const scenarioPayload = buildScenarioPayload(scenario)
-      const data = await interact(scenarioPayload, message, conversationHistory)
+      const data = await interact(scenarioForApi, message, conversationHistory)
       setConversationHistory(data.conversationHistory)
       setCallerAudioUrl(data.audioUrl)
       setTranscript((prev) => [
@@ -251,8 +287,7 @@ export default function LiveSimulationPage({
     setApiError(null)
     setApiLoading(true)
     try {
-      const scenarioPayload = buildScenarioPayload(scenario)
-      const data = await interact(scenarioPayload, message, conversationHistory)
+      const data = await interact(scenarioForApi, message, conversationHistory)
       setConversationHistory(data.conversationHistory)
       setCallerAudioUrl(data.audioUrl)
       setTranscript((prev) => [
@@ -286,9 +321,8 @@ export default function LiveSimulationPage({
         r.onerror = () => reject(new Error("Failed to read recording"))
         r.readAsDataURL(blob)
       })
-      const scenarioPayload = buildScenarioPayload(scenario)
       const data = await interactWithVoice(
-        scenarioPayload,
+        scenarioForApi,
         base64,
         conversationHistory
       )
@@ -366,7 +400,10 @@ export default function LiveSimulationPage({
               <Button
                 onClick={handleStartCall}
                 className="gap-2"
-                disabled={connectionStatus === "connecting"}
+                disabled={
+                  connectionStatus === "connecting" ||
+                  (scenarioId === "generated" && !generatedScenario)
+                }
               >
                 {connectionStatus === "connecting" ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -431,17 +468,27 @@ export default function LiveSimulationPage({
             <CardContent className="flex flex-col gap-4">
               {/* Scenario */}
               <div className="rounded-lg border bg-muted/50 p-3">
-                <div className="mb-2 flex items-center gap-2">
-                  <ScenarioIcon className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm font-medium text-foreground">
-                    {scenario.title}
-                  </span>
-                </div>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  Caller: {scenario.callerProfile.name},{" "}
-                  {scenario.callerProfile.age}y,{" "}
-                  {scenario.callerProfile.emotion}
-                </p>
+                {scenarioId === "generated" && !generatedScenario ? (
+                  <p className="text-xs text-muted-foreground">
+                    No generated scenario in this session. Return to setup and use
+                    &quot;Generate scenario &amp; start&quot; to begin.
+                  </p>
+                ) : (
+                  <>
+                    <div className="mb-2 flex items-center gap-2">
+                      <ScenarioIcon className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-sm font-medium text-foreground">
+                        {generatedScenario?.scenario?.title ?? scenario.title}
+                      </span>
+                    </div>
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      Caller:{" "}
+                      {generatedScenario?.scenario?.caller_profile
+                        ? `${generatedScenario.scenario.caller_profile.name}, ${generatedScenario.scenario.caller_profile.age}y, ${generatedScenario.scenario.caller_profile.emotion}`
+                        : `${scenario.callerProfile.name}, ${scenario.callerProfile.age}y, ${scenario.callerProfile.emotion}`}
+                    </p>
+                  </>
+                )}
               </div>
 
               {/* Connection */}
