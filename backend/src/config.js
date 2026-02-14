@@ -33,4 +33,9 @@ export const config = {
 
   /** Directory (relative to project root) where generated audio files are saved. */
   generatedAudioDir: process.env.GENERATED_AUDIO_DIR || 'generated-audio',
+
+  /** RAG: directory containing 911 operator reference docs (.md, .txt). Relative to backend root. */
+  rag: {
+    docsDir: process.env.RAG_DOCS_DIR || 'ragDocs',
+  },
 };

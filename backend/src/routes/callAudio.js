@@ -3,7 +3,7 @@ import fs from 'fs/promises';
 import { Router } from 'express';
 import { randomUUID } from 'crypto';
 import { generateCallDialog, getNextCallerResponse } from '../services/openaiService.js';
-import { textToSpeech } from '../services/elevenlabsService.js';
+import { textToSpeech, sanitizeCallerResponseText } from '../services/elevenlabsService.js';
 import { speechToText } from '../services/whisperService.js';
 import { evaluateCall } from '../services/evaluationService.js';
 import { processCaller911, convertMp3ToWav } from '../utils/911audio.js';
@@ -270,12 +270,13 @@ router.post('/interact', async (req, res) => {
     const conversationHistory = parseConversationHistory(rawHistory);
 
     // Generate next caller response (GPT-4) with full context and optional persona
-    const nextCallerText = await getNextCallerResponse(
+    const rawCallerText = await getNextCallerResponse(
       scenario,
       conversationHistory,
       operatorMessage,
       voiceOptions
     );
+    const nextCallerText = sanitizeCallerResponseText(rawCallerText) || rawCallerText;
 
     // Convert to audio (ElevenLabs), then optionally 911 phone-chain (requires ffmpeg)
     const id = randomUUID();
