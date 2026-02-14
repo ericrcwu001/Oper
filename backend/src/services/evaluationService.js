@@ -37,7 +37,7 @@ Return a JSON object only, no other text, with this exact structure:
   "missedActions": [<string>, ...],
   "feedbackBullets": [<string>, ...],
   "transcriptHighlights": [
-    { "turnIndex": <number>, "type": "missed_action" | "red_flag" | "improvement", "label": "<short string>", "detail": "<optional 1-2 sentences>" },
+    { "turnIndex": <number>, "type": "missed_action" | "red_flag" | "improvement" | "good_move", "label": "<short string>", "detail": "<optional 1-2 sentences>" },
     ...
   ]
 }
@@ -47,7 +47,7 @@ Return a JSON object only, no other text, with this exact structure:
 - overallScore: Overall performance (can be average of the three or your judgment).
 - missedActions: 0-5 short strings describing what they should have done but didn't. Empty array if none.
 - feedbackBullets: 2-5 short, constructive feedback sentences.
-- transcriptHighlights: 0-8 items linking feedback to specific transcript turns. Use the number in brackets at the start of each transcript line as turnIndex (0-based). Focus on operator turns where they missed something, created a red flag, or where they could improve. type: "missed_action" = should have done something here; "red_flag" = concerning or risky; "improvement" = could have been better (softer). label: very short (e.g. "Ask for callback number"); detail: optional brief explanation. Only include highlights that clearly tie to one turn.`;
+- transcriptHighlights: Link feedback to specific OPERATOR turns only. Use the number in brackets at the start of each transcript line as turnIndex (0-based). CRITICAL: Only use turnIndex for lines where the speaker is "operator"—never attach highlights to caller lines. Include both constructive and positive feedback. type: "missed_action" = should have done something here; "red_flag" = concerning or risky; "improvement" = could have been better (softer); "good_move" = something the operator did well (e.g. calm tone, got location, reassured caller). At most ONE negative highlight (missed_action or red_flag) per operator turn; you may include one improvement and one good_move per turn. label: very short; detail: optional. 0-10 items total.`;
 
   const userPrompt = `Scenario context: ${scenarioDescription}
 
@@ -75,15 +75,17 @@ Evaluate and return the JSON object only.`;
   const parsed = JSON.parse(json);
 
   const numTurns = transcript.length;
-  const transcriptHighlights = Array.isArray(parsed.transcriptHighlights)
+  const validTypes = ['missed_action', 'red_flag', 'improvement', 'good_move'];
+  const isOperatorTurn = (i) => i >= 0 && i < numTurns && transcript[i].speaker === 'operator';
+
+  let transcriptHighlights = Array.isArray(parsed.transcriptHighlights)
     ? parsed.transcriptHighlights
         .filter(
           (h) =>
             h &&
             typeof h.turnIndex === 'number' &&
-            h.turnIndex >= 0 &&
-            h.turnIndex < numTurns &&
-            ['missed_action', 'red_flag', 'improvement'].includes(h.type)
+            isOperatorTurn(h.turnIndex) &&
+            validTypes.includes(h.type)
         )
         .map((h) => ({
           turnIndex: h.turnIndex,
@@ -92,6 +94,17 @@ Evaluate and return the JSON object only.`;
           detail: h.detail != null ? String(h.detail).trim() : undefined,
         }))
     : [];
+
+  // At most one negative (missed_action or red_flag) per turn; keep first of each
+  const negativePerTurn = new Set();
+  transcriptHighlights = transcriptHighlights.filter((h) => {
+    if (h.type === 'missed_action' || h.type === 'red_flag') {
+      const key = h.turnIndex;
+      if (negativePerTurn.has(key)) return false;
+      negativePerTurn.add(key);
+    }
+    return true;
+  });
 
   return {
     protocolAdherence: Math.min(100, Math.max(0, Number(parsed.protocolAdherence) || 0)),

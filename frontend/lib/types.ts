@@ -29,7 +29,11 @@ export interface TranscriptTurn {
   isPartial?: boolean
 }
 
-export type TranscriptHighlightType = "missed_action" | "red_flag" | "improvement"
+export type TranscriptHighlightType =
+  | "missed_action"
+  | "red_flag"
+  | "improvement"
+  | "good_move"
 
 export interface TranscriptHighlight {
   turnIndex: number
