@@ -56,6 +56,8 @@ export interface GeneratedScenarioPayload {
   response_behavior?: string[]
   opening_line?: string
   do_not_say?: string[]
+  /** Map of seconds-into-call (string keys) to event descriptions. */
+  timeline?: Record<string, string>
 }
 
 /** Scenario sent to generate-call-audio / interact: string (legacy), simple payload, or full generator payload. */
@@ -84,17 +86,32 @@ export async function generateScenario(
   return res.json() as Promise<GeneratedScenarioPayload>
 }
 
+/** Optional context for caller response: current call time and events since last response. */
+export interface CallerResponseContext {
+  /** Seconds into the call. */
+  callTimestampSeconds: number
+  /** Event descriptions that occurred since the last caller response (from scenario timeline). */
+  eventsSinceLastResponse?: string[]
+}
+
 /**
  * Generate initial caller audio (POST /generate-call-audio).
  * Accepts simple ScenarioPayload or full GeneratedScenarioPayload for voice + persona settings.
  */
 export async function generateCallAudio(
-  scenario: CallScenarioInput
+  scenario: CallScenarioInput,
+  context?: CallerResponseContext
 ): Promise<GenerateCallAudioResponse> {
+  const body: Record<string, unknown> = { scenario }
+  if (context != null) {
+    body.callTimestampSeconds = context.callTimestampSeconds
+    if (context.eventsSinceLastResponse?.length)
+      body.eventsSinceLastResponse = context.eventsSinceLastResponse
+  }
   const res = await fetch(`${API_BASE}/generate-call-audio`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ scenario }),
+    body: JSON.stringify(body),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))
@@ -112,16 +129,23 @@ export async function generateCallAudio(
 export async function interact(
   scenario: CallScenarioInput,
   userInput: string,
-  conversationHistory: { role: "caller" | "operator"; content: string }[]
+  conversationHistory: { role: "caller" | "operator"; content: string }[],
+  context?: CallerResponseContext
 ): Promise<InteractResponse> {
+  const body: Record<string, unknown> = {
+    scenario,
+    userInput,
+    conversationHistory,
+  }
+  if (context != null) {
+    body.callTimestampSeconds = context.callTimestampSeconds
+    if (context.eventsSinceLastResponse?.length)
+      body.eventsSinceLastResponse = context.eventsSinceLastResponse
+  }
   const res = await fetch(`${API_BASE}/interact`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      scenario,
-      userInput,
-      conversationHistory,
-    }),
+    body: JSON.stringify(body),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))
@@ -140,16 +164,23 @@ export async function interact(
 export async function interactWithVoice(
   scenario: CallScenarioInput,
   userInputAudioBase64: string,
-  conversationHistory: { role: "caller" | "operator"; content: string }[]
+  conversationHistory: { role: "caller" | "operator"; content: string }[],
+  context?: CallerResponseContext
 ): Promise<InteractResponse> {
+  const body: Record<string, unknown> = {
+    scenario,
+    userInputAudio: userInputAudioBase64,
+    conversationHistory,
+  }
+  if (context != null) {
+    body.callTimestampSeconds = context.callTimestampSeconds
+    if (context.eventsSinceLastResponse?.length)
+      body.eventsSinceLastResponse = context.eventsSinceLastResponse
+  }
   const res = await fetch(`${API_BASE}/interact`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      scenario,
-      userInputAudio: userInputAudioBase64,
-      conversationHistory,
-    }),
+    body: JSON.stringify(body),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))
@@ -171,20 +202,26 @@ export interface Evaluation {
 
 /**
  * Evaluate operator performance from transcript and notes (POST /evaluate).
+ * scenarioTimeline: optional map of seconds (string keys) to event descriptions for this scenario.
  */
 export async function evaluateCall(
   transcript: { speaker: string; text: string; timestamp?: number }[],
   notes: { text: string; tag?: string; timestamp?: number }[],
-  scenarioDescription: string
+  scenarioDescription: string,
+  scenarioTimeline?: Record<string, string>
 ): Promise<Evaluation> {
+  const body: Record<string, unknown> = {
+    transcript,
+    notes,
+    scenarioDescription,
+  }
+  if (scenarioTimeline != null && Object.keys(scenarioTimeline).length > 0) {
+    body.scenarioTimeline = scenarioTimeline
+  }
   const res = await fetch(`${API_BASE}/evaluate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      transcript,
-      notes,
-      scenarioDescription,
-    }),
+    body: JSON.stringify(body),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))

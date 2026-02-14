@@ -90,9 +90,16 @@ function buildPersonaInstructions(payload, isOpening) {
  *
  * @param {string} scenario - Description of the emergency (and caller, if no payload).
  * @param {object} [personaPayload] - Optional full scenario payload (scenario, persona, dialogue_directions, opening_line, etc.)
+ * @param {number} [callTimestampSeconds] - Optional seconds into the call (e.g. 0 for opening).
+ * @param {string[]} [eventsSinceLastResponse] - Optional event descriptions that have occurred (e.g. from scenario timeline).
  * @returns {Promise<string>} - The generated dialog text (caller's opening speech).
  */
-export async function generateCallDialog(scenario, personaPayload) {
+export async function generateCallDialog(
+  scenario,
+  personaPayload,
+  callTimestampSeconds = 0,
+  eventsSinceLastResponse = []
+) {
   if (!config.openai.apiKey) {
     throw new Error(
       'OPENAI_API_KEY is not set. Add it to .env or set the environment variable.'
@@ -103,6 +110,10 @@ export async function generateCallDialog(scenario, personaPayload) {
 
   const personaBlock = buildPersonaInstructions(personaPayload, true);
   const guidance = getDifficultyGuidance(personaPayload);
+  const timeContext =
+    eventsSinceLastResponse.length > 0
+      ? `\nCurrent moment in call: ${callTimestampSeconds} seconds. External events at this moment in the scene (if any): ${eventsSinceLastResponse.join('; ')}.`
+      : '';
   const systemPrompt = `You are writing a short script for a 911 emergency call. 
 The caller is a civilian reporting an emergency. Generate ONLY the caller's opening statement 
 as they would say it when the operator answers – realistic, concise, and appropriate for the situation.
@@ -112,7 +123,7 @@ ${personaBlock}
 
 Do not include operator lines or stage directions. Output plain text only, one paragraph.`;
 
-  const userPrompt = `Scenario: ${scenario}\n\nGenerate the caller's opening statement.`;
+  const userPrompt = `Scenario: ${scenario}${timeContext}\n\nGenerate the caller's opening statement.`;
 
   const completion = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
@@ -144,9 +155,18 @@ Do not include operator lines or stage directions. Output plain text only, one p
  * @param {ConversationTurn[]} conversationHistory - Previous turns (caller and operator).
  * @param {string} operatorMessage - Latest message from the operator (text or transcribed speech).
  * @param {object} [personaPayload] - Optional full scenario payload (scenario, persona, dialogue_directions, response_behavior, etc.)
+ * @param {number|null} [callTimestampSeconds] - Optional seconds into the call.
+ * @param {string[]} [eventsSinceLastResponse] - Optional event descriptions that occurred since the last caller response (from scenario timeline).
  * @returns {Promise<string>} - The next caller response text.
  */
-export async function getNextCallerResponse(scenario, conversationHistory, operatorMessage, personaPayload) {
+export async function getNextCallerResponse(
+  scenario,
+  conversationHistory,
+  operatorMessage,
+  personaPayload,
+  callTimestampSeconds = null,
+  eventsSinceLastResponse = []
+) {
   if (!config.openai.apiKey) {
     throw new Error(
       'OPENAI_API_KEY is not set. Add it to .env or set the environment variable.'
@@ -157,6 +177,17 @@ export async function getNextCallerResponse(scenario, conversationHistory, opera
 
   const personaBlock = buildPersonaInstructions(personaPayload, false);
   const guidance = getDifficultyGuidance(personaPayload);
+  const timeContext =
+    callTimestampSeconds != null || eventsSinceLastResponse.length > 0
+      ? [
+          callTimestampSeconds != null ? `Current time in call: ${callTimestampSeconds} seconds.` : '',
+          eventsSinceLastResponse.length > 0
+            ? `External events that just occurred in the scene (fixed timeline; weave into your response if relevant): ${eventsSinceLastResponse.join('; ')}.`
+            : '',
+        ]
+          .filter(Boolean)
+          .join(' ')
+      : '';
   const systemPrompt = `You are playing the role of a 911 caller in a training simulation. 
 The following describes the emergency situation. Stay in character and respond as the caller would: 
 realistic, emotional when appropriate, and concise.
@@ -166,7 +197,7 @@ ${personaBlock}
 
 Do not include operator lines or stage directions. Output only the caller's reply as plain text.
 
-Scenario: ${scenario}`;
+Scenario: ${scenario}${timeContext ? `\n\n${timeContext}` : ''}`;
 
   const messages = [
     { role: 'system', content: systemPrompt },

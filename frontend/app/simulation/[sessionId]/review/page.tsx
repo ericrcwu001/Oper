@@ -22,6 +22,7 @@ import {
   Plus,
   LayoutDashboard,
   CheckCircle2,
+  ListOrdered,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { scenarios, callerScripts } from "@/lib/mock-data"
@@ -95,6 +96,15 @@ function formatTs(sec: number) {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
 }
 
+/** Timeline entries sorted by seconds for display. */
+function timelineEntries(timeline: Record<string, string> | undefined): { seconds: number; text: string }[] {
+  if (!timeline || typeof timeline !== "object") return []
+  return Object.entries(timeline)
+    .map(([k, v]) => ({ seconds: parseInt(k, 10), text: typeof v === "string" ? v.trim() : String(v) }))
+    .filter((e) => !Number.isNaN(e.seconds) && e.text)
+    .sort((a, b) => a.seconds - b.seconds)
+}
+
 const STORAGE_KEY_GENERATED = "simulation-generated-scenario"
 
 export default function ReviewPage({
@@ -109,6 +119,7 @@ export default function ReviewPage({
   const [scenario, setScenario] = useState(() =>
     scenarios.find((s) => s.id === (scenarioIdFromUrl || "scenario-1")) || scenarios[0]
   )
+  const [scenarioTimeline, setScenarioTimeline] = useState<Record<string, string>>({})
 
   useEffect(() => {
     try {
@@ -117,6 +128,7 @@ export default function ReviewPage({
       if (raw) {
         const payload = JSON.parse(raw) as {
           scenario?: { title?: string; description?: string }
+          timeline?: Record<string, string>
         }
         if (payload?.scenario?.title != null) {
           setScenario((prev) => ({
@@ -124,6 +136,9 @@ export default function ReviewPage({
             title: payload.scenario?.title ?? prev?.title,
             description: payload.scenario?.description ?? prev?.description,
           }))
+        }
+        if (payload?.timeline != null && typeof payload.timeline === "object" && !Array.isArray(payload.timeline)) {
+          setScenarioTimeline(payload.timeline)
         }
       }
     } catch {
@@ -165,7 +180,8 @@ export default function ReviewPage({
     evaluateCall(
       reviewTranscript,
       reviewNotes,
-      scenario.description || "911 emergency call"
+      scenario.description || "911 emergency call",
+      Object.keys(scenarioTimeline).length > 0 ? scenarioTimeline : undefined
     )
       .then((e) => {
         if (!cancelled) setEvaluation(e)
@@ -176,7 +192,7 @@ export default function ReviewPage({
     return () => {
       cancelled = true
     }
-  }, [reviewTranscript, reviewNotes, scenario.description])
+  }, [reviewTranscript, reviewNotes, scenario.description, scenarioTimeline])
 
   const filteredTranscript = searchQuery
     ? reviewTranscript.filter((t) =>
@@ -320,6 +336,33 @@ export default function ReviewPage({
                 )}
               </CardContent>
             </Card>
+
+            {/* Scenario timeline (fixed external events) */}
+            {timelineEntries(scenarioTimeline).length > 0 && (
+              <Card className="border bg-card">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <ListOrdered className="h-4 w-4 text-muted-foreground" />
+                    Scenario Timeline
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ul className="flex flex-col gap-2">
+                    {timelineEntries(scenarioTimeline).map(({ seconds, text }) => (
+                      <li
+                        key={seconds}
+                        className="flex items-start gap-2 rounded-md border bg-muted/30 px-3 py-2 text-sm"
+                      >
+                        <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                          {formatTs(seconds)}
+                        </span>
+                        <span className="text-foreground">{text}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Operator Summary – notes taken during the call */}
             <Card className="border bg-card">

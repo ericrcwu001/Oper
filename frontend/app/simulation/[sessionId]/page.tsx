@@ -102,6 +102,24 @@ function formatTime(sec: number) {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
 }
 
+/** Timeline: keys = seconds (string), values = event description. Returns events in (lastSeconds, currentSeconds]. */
+function getEventsSince(
+  lastSeconds: number,
+  currentSeconds: number,
+  timeline: Record<string, string> | undefined
+): string[] {
+  if (!timeline || typeof timeline !== "object") return []
+  const out: string[] = []
+  for (const [key, desc] of Object.entries(timeline)) {
+    const t = parseInt(key, 10)
+    if (Number.isNaN(t)) continue
+    if (t > lastSeconds && t <= currentSeconds && typeof desc === "string" && desc.trim()) {
+      out.push(desc.trim())
+    }
+  }
+  return out.sort((_a, _b) => 0) // keep insertion order; keys may not be sorted
+}
+
 export default function LiveSimulationPage({
   params,
 }: {
@@ -163,6 +181,7 @@ export default function LiveSimulationPage({
   const [conversationHistory, setConversationHistory] = useState<
     { role: "caller" | "operator"; content: string }[]
   >([])
+  const [lastCallerResponseSeconds, setLastCallerResponseSeconds] = useState(0)
   const [apiLoading, setApiLoading] = useState(false)
   const [apiError, setApiError] = useState<string | null>(null)
   const [notes, setNotes] = useState<NoteEntry[]>([])
@@ -237,8 +256,11 @@ export default function LiveSimulationPage({
     setCallerAudioUrl(null)
     setConversationHistory([])
     setNotes([])
+    setLastCallerResponseSeconds(0)
     try {
-      const data = await generateCallAudio(scenarioForApi)
+      const data = await generateCallAudio(scenarioForApi, {
+        callTimestampSeconds: 0,
+      })
       setCallerAudioUrl(data.audioUrl)
       setTranscript([
         {
@@ -249,6 +271,7 @@ export default function LiveSimulationPage({
         },
       ])
       setConversationHistory([{ role: "caller", content: data.transcript }])
+      setLastCallerResponseSeconds(0)
       setCallActive(true)
       setConnectionStatus("connected")
       setCallSeconds(0)
@@ -294,10 +317,26 @@ export default function LiveSimulationPage({
     setTextInput("")
     setApiError(null)
     setApiLoading(true)
+    const timeline = scenarioPayload?.timeline
+    const eventsSince = getEventsSince(
+      lastCallerResponseSeconds,
+      callSeconds,
+      timeline
+    )
     try {
-      const data = await interact(scenarioForApi, message, conversationHistory)
+      const data = await interact(
+        scenarioForApi,
+        message,
+        conversationHistory,
+        {
+          callTimestampSeconds: callSeconds,
+          eventsSinceLastResponse:
+            eventsSince.length > 0 ? eventsSince : undefined,
+        }
+      )
       setConversationHistory(data.conversationHistory)
       setCallerAudioUrl(data.audioUrl)
+      setLastCallerResponseSeconds(callSeconds)
       setTranscript((prev) => [
         ...prev,
         {
@@ -329,10 +368,26 @@ export default function LiveSimulationPage({
     ])
     setApiError(null)
     setApiLoading(true)
+    const timelineClarify = scenarioPayload?.timeline
+    const eventsSinceClarify = getEventsSince(
+      lastCallerResponseSeconds,
+      callSeconds,
+      timelineClarify
+    )
     try {
-      const data = await interact(scenarioForApi, message, conversationHistory)
+      const data = await interact(
+        scenarioForApi,
+        message,
+        conversationHistory,
+        {
+          callTimestampSeconds: callSeconds,
+          eventsSinceLastResponse:
+            eventsSinceClarify.length > 0 ? eventsSinceClarify : undefined,
+        }
+      )
       setConversationHistory(data.conversationHistory)
       setCallerAudioUrl(data.audioUrl)
+      setLastCallerResponseSeconds(callSeconds)
       setTranscript((prev) => [
         ...prev,
         {
@@ -353,6 +408,12 @@ export default function LiveSimulationPage({
     if (!callActive) return
     setApiError(null)
     setApiLoading(true)
+    const timelineVoice = scenarioPayload?.timeline
+    const eventsSinceVoice = getEventsSince(
+      lastCallerResponseSeconds,
+      callSeconds,
+      timelineVoice
+    )
     try {
       const base64 = await new Promise<string>((resolve, reject) => {
         const r = new FileReader()
@@ -367,10 +428,16 @@ export default function LiveSimulationPage({
       const data = await interactWithVoice(
         scenarioForApi,
         base64,
-        conversationHistory
+        conversationHistory,
+        {
+          callTimestampSeconds: callSeconds,
+          eventsSinceLastResponse:
+            eventsSinceVoice.length > 0 ? eventsSinceVoice : undefined,
+        }
       )
       setConversationHistory(data.conversationHistory)
       setCallerAudioUrl(data.audioUrl)
+      setLastCallerResponseSeconds(callSeconds)
       const operatorTurn = data.conversationHistory[data.conversationHistory.length - 2]
       const operatorText =
         operatorTurn?.role === "operator" ? operatorTurn.content : "[Voice]"

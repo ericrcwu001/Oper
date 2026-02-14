@@ -155,8 +155,18 @@ router.post('/generate-call-audio', async (req, res) => {
       });
     }
 
+    const callTimestampSeconds = typeof req.body.callTimestampSeconds === 'number' ? req.body.callTimestampSeconds : 0;
+    const eventsSinceLastResponse = Array.isArray(req.body.eventsSinceLastResponse)
+      ? req.body.eventsSinceLastResponse.filter((e) => typeof e === 'string' && e.trim())
+      : [];
+
     // 1. Generate dialog from scenario (OpenAI); pass persona payload when available for persona-based dialogue
-    const transcript = await generateCallDialog(fullScenario, voiceOptions);
+    const transcript = await generateCallDialog(
+      fullScenario,
+      voiceOptions,
+      callTimestampSeconds,
+      eventsSinceLastResponse
+    );
 
     // 2. Convert dialog to audio (ElevenLabs); voiceOptions = string (legacy) or scenario generator payload (voice + persona settings)
     const id = randomUUID();
@@ -269,12 +279,20 @@ router.post('/interact', async (req, res) => {
 
     const conversationHistory = parseConversationHistory(rawHistory);
 
+    const callTimestampSeconds =
+      typeof req.body.callTimestampSeconds === 'number' ? req.body.callTimestampSeconds : null;
+    const eventsSinceLastResponse = Array.isArray(req.body.eventsSinceLastResponse)
+      ? req.body.eventsSinceLastResponse.filter((e) => typeof e === 'string' && e.trim())
+      : [];
+
     // Generate next caller response (GPT-4) with full context and optional persona
     const rawCallerText = await getNextCallerResponse(
       scenario,
       conversationHistory,
       operatorMessage,
-      voiceOptions
+      voiceOptions,
+      callTimestampSeconds,
+      eventsSinceLastResponse
     );
     const nextCallerText = sanitizeCallerResponseText(rawCallerText) || rawCallerText;
 
@@ -321,12 +339,13 @@ router.post('/interact', async (req, res) => {
 /**
  * POST /evaluate
  *
- * Body: { transcript: TranscriptTurn[], notes: NoteEntry[], scenarioDescription: string }
+ * Body: { transcript, notes, scenarioDescription, scenarioTimeline?: Record<string, string> }
+ * scenarioTimeline: optional map of seconds (string keys) to event descriptions (fixed external events).
  * Returns: { protocolAdherence, timeliness, criticalInfoCapture, overallScore, missedActions, feedbackBullets }
  */
 router.post('/evaluate', async (req, res) => {
   try {
-    const { transcript, notes, scenarioDescription } = req.body;
+    const { transcript, notes, scenarioDescription, scenarioTimeline } = req.body;
     if (!Array.isArray(transcript)) {
       return res.status(400).json({ error: 'Missing or invalid "transcript" array.' });
     }
@@ -334,7 +353,11 @@ router.post('/evaluate', async (req, res) => {
       return res.status(400).json({ error: 'Missing or invalid "notes" array.' });
     }
     const scenario = typeof scenarioDescription === 'string' ? scenarioDescription.trim() : '';
-    const evaluation = await evaluateCall(transcript, notes, scenario || '911 emergency call.');
+    const timeline =
+      scenarioTimeline != null && typeof scenarioTimeline === 'object' && !Array.isArray(scenarioTimeline)
+        ? scenarioTimeline
+        : undefined;
+    const evaluation = await evaluateCall(transcript, notes, scenario || '911 emergency call.', timeline);
     return res.status(200).json(evaluation);
   } catch (err) {
     console.error('evaluate error:', err.message);

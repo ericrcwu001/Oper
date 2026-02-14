@@ -9,9 +9,10 @@ import { getRelevantContext } from './ragService.js';
  * @param {Array<{ speaker: string, text: string, timestamp?: number }>} transcript
  * @param {Array<{ text: string, tag?: string, timestamp?: number }>} notes
  * @param {string} scenarioDescription
+ * @param {Record<string, string>} [scenarioTimeline] - Optional map of seconds (string keys) to fixed external event descriptions.
  * @returns {Promise<{ protocolAdherence: number, timeliness: number, criticalInfoCapture: number, overallScore: number, missedActions: string[], feedbackBullets: string[], transcriptHighlights: object[] }>}
  */
-export async function evaluateCall(transcript, notes, scenarioDescription) {
+export async function evaluateCall(transcript, notes, scenarioDescription, scenarioTimeline) {
   if (!config.openai.apiKey) {
     throw new Error('OPENAI_API_KEY is not set.');
   }
@@ -59,7 +60,18 @@ Return a JSON object only, no other text, with this exact structure:
 - feedbackBullets: 2-5 short, constructive feedback sentences.
 - transcriptHighlights: Link feedback to specific OPERATOR turns only. Use the number in brackets at the start of each transcript line as turnIndex (0-based). CRITICAL: Only use turnIndex for lines where the speaker is "operator"—never attach highlights to caller lines. Include both constructive and positive feedback. type: "missed_action" = should have done something here; "red_flag" = concerning or risky; "improvement" = could have been better (softer); "good_move" = something the operator did well (e.g. calm tone, got location, reassured caller). At most ONE negative highlight (missed_action or red_flag) per operator turn; you may include one improvement and one good_move per turn. label: very short; detail: optional. 0-10 items total.`;
 
-  const userPrompt = `Scenario context: ${scenarioDescription}
+  const timelineBlock =
+    scenarioTimeline &&
+    typeof scenarioTimeline === 'object' &&
+    !Array.isArray(scenarioTimeline) &&
+    Object.keys(scenarioTimeline).length > 0
+      ? `\n\nFixed scenario timeline (external events that occurred at these times during the call; consider whether the operator responded appropriately):\n${Object.entries(scenarioTimeline)
+          .sort((a, b) => Number(a[0]) - Number(b[0]))
+          .map(([sec, desc]) => `  ${sec}s: ${typeof desc === 'string' ? desc.trim() : desc}`)
+          .join('\n')}`
+      : '';
+
+  const userPrompt = `Scenario context: ${scenarioDescription}${timelineBlock}
 
 CALL TRANSCRIPT (number in brackets is turnIndex for transcriptHighlights):
 ${transcriptWithIndices || '(No transcript)'}

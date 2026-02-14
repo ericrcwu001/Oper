@@ -88,6 +88,7 @@ Requirements:
 - Caller profile must include personal details: name, age, emotion, gender, race, and optionally other_relevant_details (e.g. accent, first language, occupation if relevant to the scenario, physical description). Use these so the persona and voice agent can generate realistic, grounded dialogue.
 - Caller persona must be aligned to ElevenLabs Flash v2.5 voice settings: provide stability (0-1 float, lower = more emotional range), style (0-1 float), speed (float e.g. 0.9-1.2), and voice_description (short text: accent, age, gender, emotional tone). These will be used for the voice agent system prompt and ElevenLabs API.
 - Voice-agent fields: role_instruction (one short line, e.g. "You are [name], [age], calling 911 as..."), scenario_summary_for_agent (2-4 sentences ground truth the agent must know), critical_info (facts the caller should reveal when asked), withheld_information (details that require more probing and questioning from the operator to surface—NOT information the persona is purposely hiding from 911. These are contextual details that help the operator understand the situation better but only come out when the operator asks the right questions. Examples: after a crime, perpetrator height/race/clothing; layout of the room; whether anyone else is in the building. Include 1-4 items for medium/hard; easy may have 0-1.), behavior_notes (how caller may react, e.g. may become tearful, may misstate address once), dialogue_directions (explicit acting directions for how to speak: disfluencies like ums/uhs/pauses, false starts, volatility of language, sentence length; scale by difficulty—easy: minimal fillers, clear sentences; medium: some hesitation, repetition; hard: heavy disfluency, fragmented speech, emotional outbursts, crying), response_behavior (array of short instructions for how to react to the operator, e.g. "Give address only after being asked" or "Reveal suspect description when operator asks what they looked like"), opening_line (the first thing the caller says when the call connects; one short line), do_not_say (array of phrases or topics the caller would never say—stay in character; e.g. "I'm an AI", "What's the script?", breaking the fourth wall).
+- Timeline: Optional "timeline" of external, fixed events only—things that happen in the scene at a given time, with no dependence on the operator. Use quick, rapid-fire timings: 10, 20, 30, 40 seconds (not 90 or 120). Keys are seconds into the call (strings, e.g. "10", "20"). Each value is a short description of what happens at that moment. Include 0–5 events; 0 events is valid when the scenario has no fixed external developments. Do NOT include an event at 0. CRITICAL—events must NOT depend on operator actions: forbidden examples include "ambulance is dispatched", "help is on the way", "operator asks for address", "caller gives location when asked". Only include events that occur in the caller's environment regardless of the call (e.g. victim stops breathing; intruder breaks in through window; fire spreads to stairwell; second person heard downstairs; victim becomes unresponsive). If the scenario has no such developments, use an empty timeline {}.
 
 Difficulty drives how the caller persona behaves. Make the difference between easy, medium, and hard very exaggerated:
 
@@ -126,7 +127,10 @@ Output JSON with this exact structure (use these keys):
   "dialogue_directions": "<how to speak: disfluencies, pauses, volatility; match difficulty (easy=clear, hard=fragmented/emotional)>",
   "response_behavior": ["<how to react to operator, e.g. Give address only after being asked>", ...],
   "opening_line": "<first thing caller says when call connects>",
-  "do_not_say": ["<phrase/topic caller would never say>", ...]
+  "do_not_say": ["<phrase/topic caller would never say>", ...],
+  "timeline": {
+    "<optional; use 10, 20, 30, 40s for rapid-fire; 0-5 events; empty {} if no fixed scene developments>": "<only events that happen in the scene without operator action; never dispatch/caller-reveals/operator-asks>"
+  }
 }`;
 
 function userPrompt(difficulty, scenarioType) {
@@ -145,7 +149,8 @@ const VALID_DIFFICULTIES = ['easy', 'medium', 'hard'];
  * @param {string} difficulty - One of "easy", "medium", "hard".
  * @returns {Promise<object>} Payload with scenario, persona, caller_script, role_instruction,
  *   scenario_summary_for_agent, critical_info, withheld_information, behavior_notes,
- *   dialogue_directions, response_behavior, opening_line, do_not_say.
+ *   dialogue_directions, response_behavior, opening_line, do_not_say, and timeline.
+ *   timeline: object mapping seconds-into-call (string keys, e.g. "10", "20") to event descriptions; may be empty {}.
  * @throws {Error} If OPENAI_API_KEY is missing, difficulty is invalid, or OpenAI API errors.
  */
 export async function generateScenario(difficulty) {
@@ -187,6 +192,11 @@ export async function generateScenario(difficulty) {
     scenario.language = 'en';
   }
   payload.scenario = scenario;
+
+  // Ensure timeline exists: map of seconds (as string keys) -> event description
+  if (payload.timeline == null || typeof payload.timeline !== 'object' || Array.isArray(payload.timeline)) {
+    payload.timeline = {};
+  }
 
   return payload;
 }
