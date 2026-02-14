@@ -5,6 +5,8 @@ import { fileURLToPath } from 'url';
 import { config } from './config.js';
 import callAudioRouter from './routes/callAudio.js';
 import scenariosRouter from './routes/scenarios.js';
+import vehiclesRouter from './routes/vehicles.js';
+import { startSimulation } from './services/vehicleSimulation.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -29,7 +31,11 @@ app.use('/', callAudioRouter);
 // Scenario generation (difficulty → full payload for frontend + voice agent)
 app.use('/api/scenarios', scenariosRouter);
 
+// Simulated vehicle positions (poll for map dots)
+app.use('/api/vehicles', vehiclesRouter);
+
 app.listen(config.port, () => {
+  startSimulation();
   console.log(`911 call simulation backend running at http://localhost:${config.port}`);
   console.log('POST /api/scenarios/generate with body: { "difficulty": "easy"|"medium"|"hard" }');
   console.log('POST /generate-call-audio with body: { "scenario": "..." }');
