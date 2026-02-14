@@ -34,6 +34,7 @@ import {
   interact,
   interactWithVoice,
   assessCallTranscript,
+  fetchVehicles,
   type GeneratedScenarioPayload,
   type CallScenarioInput,
 } from "@/lib/api"
@@ -246,11 +247,34 @@ export default function LiveSimulationPage({
     return () => clearTimeout(t)
   }, [])
 
-  // 30 tps tick: update map points (animate police unit in small circle for live demo)
+  // Poll backend vehicles every 1s; if we get data, show 911 point + all vehicles. Else keep current points (static demo).
+  useEffect(() => {
+    const POLL_MS = 1000
+    const poll = async () => {
+      try {
+        const vehicles = await fetchVehicles()
+        if (vehicles.length > 0) {
+          const initial = getInitialMapPoints()
+          const callPoint = initial.find((p) => p.type === "911")
+          const points: MapPoint[] = callPoint ? [callPoint, ...vehicles] : vehicles
+          setMapPoints(points)
+        }
+        // If vehicles.length === 0, don't overwrite — keep existing mapPoints (initial or animated demo)
+      } catch {
+        // API down or CORS: leave mapPoints as-is
+      }
+    }
+    poll()
+    const id = setInterval(poll, POLL_MS)
+    return () => clearInterval(id)
+  }, [])
+
+  // When using static demo (no backend vehicles): animate police unit in small circle at 30fps
   useEffect(() => {
     const TICK_MS = 1000 / 30
     tick30Ref.current = setInterval(() => {
       setMapPoints((prev) => {
+        if (prev.length > 10) return prev // backend vehicles active; don't overwrite
         const base = getInitialMapPoints()
         const police = base.find((p) => p.id === "unit-p1")
         if (!police || police.type !== "police") return prev
@@ -670,7 +694,7 @@ export default function LiveSimulationPage({
 
         {/* Map - full-width top row (from map/vehicle feature) */}
         <Card className="mb-4 overflow-hidden border bg-card shrink-0">
-          <div className="relative h-[280px] min-h-[200px] w-full">
+          <div className="relative h-[420px] min-h-[280px] w-full">
             <SFMap
               points={mapPoints}
               selectedPointId={selectedPointId}

@@ -18,6 +18,11 @@ const COUNTS = { fire: 40, police: 300, ambulance: 20 };
 const SPEED_BASE = { fire: 13, police: 11, ambulance: 13 };
 const SPEED_VARIANCE = 0.15;
 const DT_SECONDS = 0.1;
+// Pause at natural stop areas (intersections): probability and duration
+const PAUSE_AT_NODE_PROBABILITY = 0.4;
+const PAUSE_MIN_SECONDS = 0.5;
+const PAUSE_MAX_SECONDS = 2.5;
+const MIN_NODE_DEGREE_FOR_PAUSE = 2; // nodes with 2+ incident edges (intersections / segment joins)
 
 let graph = null;
 let vehicles = [];
@@ -63,6 +68,7 @@ function spawnVehicles(g) {
         towardEnd,
         targetNode: towardEnd ? edge.toNodeIdx : edge.fromNodeIdx,
         speedMetersPerSecond: randomSpeed(type),
+        pauseRemainingSeconds: 0,
       });
     }
   }
@@ -88,7 +94,19 @@ function pickNextEdge(g, v) {
   v.t = fromNext ? 0 : 1;
 }
 
+function maybePauseAtNode(g, v, atNodeIdx) {
+  const degree = g.adjacency[atNodeIdx].length;
+  if (degree < MIN_NODE_DEGREE_FOR_PAUSE || Math.random() >= PAUSE_AT_NODE_PROBABILITY) return;
+  v.pauseRemainingSeconds =
+    PAUSE_MIN_SECONDS + Math.random() * (PAUSE_MAX_SECONDS - PAUSE_MIN_SECONDS);
+}
+
 function advanceVehicle(g, v) {
+  if (v.pauseRemainingSeconds > 0) {
+    v.pauseRemainingSeconds = Math.max(0, v.pauseRemainingSeconds - DT_SECONDS);
+    return;
+  }
+
   const edge = g.edges[v.currentEdge];
   const segLen = edge.lengthM;
   const dist = v.speedMetersPerSecond * DT_SECONDS;
@@ -98,8 +116,10 @@ function advanceVehicle(g, v) {
 
   while (t > 1 || t < 0) {
     if (t >= 1) {
+      const atNode = edge.toNodeIdx;
       const carry = (t - 1) * segLen;
       pickNextEdge(g, v);
+      maybePauseAtNode(g, v, atNode);
       const nextEdge = g.edges[v.currentEdge];
       if (!nextEdge || carry <= 0) {
         v.t = v.towardEnd ? 0 : 1;
@@ -109,8 +129,10 @@ function advanceVehicle(g, v) {
       return;
     }
     if (t <= 0) {
+      const atNode = edge.fromNodeIdx;
       const carry = -t * segLen;
       pickNextEdge(g, v);
+      maybePauseAtNode(g, v, atNode);
       const nextEdge = g.edges[v.currentEdge];
       if (!nextEdge || carry <= 0) {
         v.t = v.towardEnd ? 0 : 1;
