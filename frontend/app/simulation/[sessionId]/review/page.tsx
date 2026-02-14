@@ -120,9 +120,9 @@ export default function ReviewPage({
         }
         if (payload?.scenario?.title != null) {
           setScenario((prev) => ({
-            ...prev,
-            title: payload.scenario!.title ?? prev.title,
-            description: payload.scenario!.description ?? prev.description,
+            ...(prev || {}),
+            title: payload.scenario?.title ?? prev?.title,
+            description: payload.scenario?.description ?? prev?.description,
           }))
         }
       }

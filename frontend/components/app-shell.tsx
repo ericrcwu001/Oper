@@ -8,6 +8,7 @@ import {
   Radio,
   Menu,
   X,
+  Activity,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -16,6 +17,7 @@ import { useState } from "react"
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/simulation", label: "Call", icon: Phone },
+  { href: "/live-eval", label: "Live Eval", icon: Activity },
 ]
 
 export function AppShell({ children }: { children: React.ReactNode }) {

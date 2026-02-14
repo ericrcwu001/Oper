@@ -1,3 +1,4 @@
+import http from 'http';
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
@@ -7,6 +8,8 @@ import callAudioRouter from './routes/callAudio.js';
 import scenariosRouter from './routes/scenarios.js';
 import vehiclesRouter from './routes/vehicles.js';
 import { startSimulation } from './services/vehicleSimulation.js';
+import callEvaluationRouter from './routes/callEvaluation.js';
+import { attachLiveEvalWebSocket } from './call-evaluation/websocket-handler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -34,9 +37,16 @@ app.use('/api/scenarios', scenariosRouter);
 // Simulated vehicle positions (poll for map dots)
 app.use('/api/vehicles', vehiclesRouter);
 
-app.listen(config.port, () => {
+// Live call evaluation: assess transcript for dispatch recommendations (used during simulation)
+app.use('/api/call-evaluation', callEvaluationRouter);
+
+const server = http.createServer(app);
+attachLiveEvalWebSocket(server);
+
+server.listen(config.port, () => {
   startSimulation();
   console.log(`911 call simulation backend running at http://localhost:${config.port}`);
+  console.log('WebSocket: ws://localhost:' + config.port + '/live-eval (live call evaluation)');
   console.log('POST /api/scenarios/generate with body: { "difficulty": "easy"|"medium"|"hard" }');
   console.log('POST /generate-call-audio with body: { "scenario": "..." }');
   console.log('POST /interact with body: { "scenario", "userInput" or "userInputAudio", optional "conversationHistory" }');
