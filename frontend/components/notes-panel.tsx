@@ -22,18 +22,19 @@ const quickTags = [
   { tag: "Units Dispatched", icon: Truck },
 ]
 
-interface NotesPanelProps {
-  callSeconds: number
-}
-
 function formatTs(sec: number) {
   const m = Math.floor(sec / 60)
   const s = sec % 60
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
 }
 
-export function NotesPanel({ callSeconds }: NotesPanelProps) {
-  const [notes, setNotes] = useState<NoteEntry[]>([])
+interface NotesPanelProps {
+  callSeconds: number
+  notes: NoteEntry[]
+  onAddNote: (entry: NoteEntry) => void
+}
+
+export function NotesPanel({ callSeconds, notes, onAddNote }: NotesPanelProps) {
   const [input, setInput] = useState("")
   const [activeTag, setActiveTag] = useState<string | undefined>()
 
@@ -45,7 +46,7 @@ export function NotesPanel({ callSeconds }: NotesPanelProps) {
       text: input.trim(),
       tag: activeTag,
     }
-    setNotes((prev) => [...prev, entry])
+    onAddNote(entry)
     setInput("")
     setActiveTag(undefined)
   }
