@@ -28,7 +28,12 @@ import {
   AlertCircle,
 } from "lucide-react"
 import { scenarios } from "@/lib/mock-data"
-import { generateCallAudio, interact, interactWithVoice } from "@/lib/api"
+import {
+  generateCallAudio,
+  interact,
+  interactWithVoice,
+  type GeneratedScenarioPayload,
+} from "@/lib/api"
 import type {
   TranscriptTurn,
   ConnectionStatus,
@@ -38,9 +43,37 @@ import type {
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
+const STORAGE_KEY_GENERATED = "simulation-generated-scenario"
+
 function buildScenarioString(scenario: Scenario): string {
   const { description, callerProfile } = scenario
   return `${description} Caller: ${callerProfile.name}, ${callerProfile.age} years old, ${callerProfile.emotion}.`
+}
+
+/** Map generator payload to frontend Scenario for UI and hints. */
+function payloadToScenario(payload: GeneratedScenarioPayload): Scenario {
+  const s = payload.scenario
+  const type = (
+    ["cardiac-arrest", "fire", "traffic-accident"] as ScenarioType[]
+  ).includes(s.scenario_type as ScenarioType)
+    ? (s.scenario_type as ScenarioType)
+    : "cardiac-arrest"
+  return {
+    id: s.id,
+    scenarioType: type,
+    title: s.title,
+    description: s.description,
+    callerProfile: {
+      name: s.caller_profile.name,
+      age: s.caller_profile.age,
+      emotion: s.caller_profile.emotion,
+    },
+    criticalInfo: s.critical_info ?? [],
+    expectedActions: s.expected_actions ?? [],
+    optionalComplications: s.optional_complications ?? [],
+    difficulty: s.difficulty as Scenario["difficulty"],
+    language: (s.language as Scenario["language"]) || "en",
+  }
 }
 
 const scenarioIcons: Record<string, React.ElementType> = {
@@ -63,11 +96,36 @@ export default function LiveSimulationPage({
   const { sessionId } = use(params)
   const router = useRouter()
   const searchParams = useSearchParams()
-  const scenarioId = searchParams.get("scenario") || "scenario-1"
+  const scenarioIdFromUrl = searchParams.get("scenario")
   const hintsEnabled = searchParams.get("hints") === "true"
 
-  const scenario = scenarios.find((s) => s.id === scenarioId) || scenarios[0]
+  const fallbackScenario =
+    scenarios.find((s) => s.id === (scenarioIdFromUrl || "scenario-1")) ||
+    scenarios[0]
+  const [scenario, setScenario] = useState<Scenario>(fallbackScenario)
+  const [scenarioPayload, setScenarioPayload] =
+    useState<GeneratedScenarioPayload | null>(null)
+
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(`${STORAGE_KEY_GENERATED}-${sessionId}`)
+      if (raw) {
+        const payload = JSON.parse(raw) as GeneratedScenarioPayload
+        if (payload?.scenario) {
+          setScenario(payloadToScenario(payload))
+          setScenarioPayload(payload)
+          return
+        }
+      }
+    } catch {
+      // ignore
+    }
+    setScenario(fallbackScenario)
+    setScenarioPayload(null)
+  }, [sessionId, scenarioIdFromUrl])
+
   const ScenarioIcon = scenarioIcons[scenario.scenarioType] || Heart
+  const scenarioId = scenario.id
 
   const [callActive, setCallActive] = useState(false)
   const [callSeconds, setCallSeconds] = useState(0)
@@ -152,8 +210,8 @@ export default function LiveSimulationPage({
     setConversationHistory([])
     setNotes([])
     try {
-      const scenarioString = buildScenarioString(scenario)
-      const data = await generateCallAudio(scenarioString)
+      const scenarioInput = scenarioPayload ?? buildScenarioString(scenario)
+      const data = await generateCallAudio(scenarioInput)
       setCallerAudioUrl(data.audioUrl)
       setTranscript([
         {
@@ -210,8 +268,8 @@ export default function LiveSimulationPage({
     setApiError(null)
     setApiLoading(true)
     try {
-      const scenarioString = buildScenarioString(scenario)
-      const data = await interact(scenarioString, message, conversationHistory)
+      const scenarioInput = scenarioPayload ?? buildScenarioString(scenario)
+      const data = await interact(scenarioInput, message, conversationHistory)
       setConversationHistory(data.conversationHistory)
       setCallerAudioUrl(data.audioUrl)
       setTranscript((prev) => [
@@ -246,8 +304,8 @@ export default function LiveSimulationPage({
     setApiError(null)
     setApiLoading(true)
     try {
-      const scenarioString = buildScenarioString(scenario)
-      const data = await interact(scenarioString, message, conversationHistory)
+      const scenarioInput = scenarioPayload ?? buildScenarioString(scenario)
+      const data = await interact(scenarioInput, message, conversationHistory)
       setConversationHistory(data.conversationHistory)
       setCallerAudioUrl(data.audioUrl)
       setTranscript((prev) => [
@@ -281,9 +339,9 @@ export default function LiveSimulationPage({
         r.onerror = () => reject(new Error("Failed to read recording"))
         r.readAsDataURL(blob)
       })
-      const scenarioString = buildScenarioString(scenario)
+      const scenarioInput = scenarioPayload ?? buildScenarioString(scenario)
       const data = await interactWithVoice(
-        scenarioString,
+        scenarioInput,
         base64,
         conversationHistory
       )

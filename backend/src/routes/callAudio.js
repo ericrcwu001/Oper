@@ -4,6 +4,7 @@ import { generateCallDialog, getNextCallerResponse } from '../services/openaiSer
 import { textToSpeech } from '../services/elevenlabsService.js';
 import { speechToText } from '../services/whisperService.js';
 import { evaluateCall } from '../services/evaluationService.js';
+import { buildVoiceAgentSystemPrompt } from '../services/scenarioGenerator.js';
 
 const router = Router();
 
@@ -12,36 +13,43 @@ const SAMPLE_SCENARIO =
   'A man at a grocery store has collapsed. He is breathing but unconscious. A bystander is calling 911 and needs to explain the situation to the operator.';
 
 /**
+ * Resolve scenario string from body: either scenarioPayload (from scenario generator) or scenario string.
+ * @param {object} body - Request body with optional scenarioPayload or scenario.
+ * @returns {string} Scenario string for OpenAI (full voice-agent prompt when payload provided).
+ */
+function resolveScenarioString(body) {
+  const { scenarioPayload, scenario: rawScenario } = body;
+  if (scenarioPayload && typeof scenarioPayload === 'object' && scenarioPayload.scenario) {
+    const built = buildVoiceAgentSystemPrompt(scenarioPayload);
+    if (built && built.trim()) return built.trim();
+  }
+  if (rawScenario !== undefined && rawScenario !== null && typeof rawScenario === 'string') {
+    const trimmed = rawScenario.trim();
+    if (trimmed) return trimmed;
+  }
+  return SAMPLE_SCENARIO;
+}
+
+/**
  * POST /generate-call-audio
  *
- * Body: { "scenario": "string" }
- * - scenario: Description of the emergency (e.g. "Jack has fallen and broken his arm, explain the situation to the operator.")
- *   Omit or leave empty to use the built-in sample scenario.
+ * Body: { "scenario": "string" } OR { "scenarioPayload": object }
+ * - scenario: Description of the emergency (legacy). Omit if using scenarioPayload.
+ * - scenarioPayload: Full payload from POST /api/scenarios/generate; used to build voice-agent context.
  *
  * Returns: { "audioUrl": "https://...", "transcript": "Generated dialog text" }
  */
 router.post('/generate-call-audio', async (req, res) => {
   try {
-    let { scenario } = req.body;
-
-    if (scenario === undefined || scenario === null) {
-      scenario = SAMPLE_SCENARIO;
-    }
-    if (typeof scenario !== 'string') {
+    const scenarioString = resolveScenarioString(req.body);
+    if (!scenarioString) {
       return res.status(400).json({
-        error: 'Invalid "scenario": must be a string. Expected JSON: { "scenario": "string" }',
-      });
-    }
-
-    const trimmedScenario = scenario.trim() || SAMPLE_SCENARIO;
-    if (!trimmedScenario) {
-      return res.status(400).json({
-        error: 'Scenario cannot be empty.',
+        error: 'Scenario cannot be empty. Provide "scenario" (string) or "scenarioPayload" (object).',
       });
     }
 
     // 1. Generate dialog from scenario (OpenAI)
-    const transcript = await generateCallDialog(trimmedScenario);
+    const transcript = await generateCallDialog(scenarioString);
 
     // 2. Convert dialog to audio (ElevenLabs) and save file
     const id = randomUUID();
@@ -112,14 +120,13 @@ function parseConversationHistory(raw) {
  */
 router.post('/interact', async (req, res) => {
   try {
-    const { scenario: rawScenario, userInput, userInputAudio, conversationHistory: rawHistory } = req.body;
+    const { userInput, userInputAudio, conversationHistory: rawHistory } = req.body;
 
-    // Scenario: required; support placeholder / dynamic scenario input later
-    let scenario =
-      typeof rawScenario === 'string' ? rawScenario.trim() : '';
+    // Scenario: from scenarioPayload (generator) or scenario string
+    const scenario = resolveScenarioString(req.body);
     if (!scenario) {
       return res.status(400).json({
-        error: 'Missing or empty "scenario". Required for context. Use dynamic scenario when integrated.',
+        error: 'Missing scenario context. Provide "scenario" (string) or "scenarioPayload" (object).',
       });
     }
 

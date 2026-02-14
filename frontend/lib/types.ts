@@ -29,6 +29,15 @@ export interface TranscriptTurn {
   isPartial?: boolean
 }
 
+export type TranscriptHighlightType = "missed_action" | "red_flag" | "improvement"
+
+export interface TranscriptHighlight {
+  turnIndex: number
+  type: TranscriptHighlightType
+  label: string
+  detail?: string
+}
+
 export interface Evaluation {
   protocolAdherence: number
   timeliness: number
@@ -36,6 +45,7 @@ export interface Evaluation {
   overallScore: number
   missedActions: string[]
   feedbackBullets: string[]
+  transcriptHighlights?: TranscriptHighlight[]
 }
 
 export interface Session {
