@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, use } from "react"
+import { useState, useEffect, use } from "react"
 import { useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { AppShell } from "@/components/app-shell"
@@ -23,7 +23,9 @@ import {
   LayoutDashboard,
   CheckCircle2,
 } from "lucide-react"
+import { Skeleton } from "@/components/ui/skeleton"
 import { scenarios, callerScripts } from "@/lib/mock-data"
+import { evaluateCall } from "@/lib/api"
 import type { TranscriptTurn, Evaluation, NoteEntry } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -98,7 +100,7 @@ export default function ReviewPage({
   const scenarioId = searchParams.get("scenario") || "scenario-1"
   const scenario = scenarios.find((s) => s.id === scenarioId) || scenarios[0]
 
-  const [evaluation] = useState<Evaluation>(generateEvaluation)
+  const [evaluation, setEvaluation] = useState<Evaluation | null>(null)
   const [reviewTranscript] = useState<TranscriptTurn[]>(() => {
     try {
       if (typeof window !== "undefined") {
@@ -128,6 +130,28 @@ export default function ReviewPage({
     }
     return []
   })
+
+  useEffect(() => {
+    if (reviewTranscript.length === 0) {
+      setEvaluation(generateEvaluation())
+      return
+    }
+    let cancelled = false
+    evaluateCall(
+      reviewTranscript,
+      reviewNotes,
+      scenario.description || "911 emergency call"
+    )
+      .then((e) => {
+        if (!cancelled) setEvaluation(e)
+      })
+      .catch(() => {
+        if (!cancelled) setEvaluation(generateEvaluation())
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [reviewTranscript, reviewNotes, scenario.description])
 
   const filteredTranscript = searchQuery
     ? reviewTranscript.filter((t) =>
@@ -178,26 +202,36 @@ export default function ReviewPage({
 
         {/* Score Cards */}
         <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <ScoreCard
-            label="Protocol Adherence"
-            score={evaluation.protocolAdherence}
-            icon={Shield}
-          />
-          <ScoreCard
-            label="Timeliness"
-            score={evaluation.timeliness}
-            icon={Clock}
-          />
-          <ScoreCard
-            label="Critical Info Captured"
-            score={evaluation.criticalInfoCapture}
-            icon={Target}
-          />
-          <ScoreCard
-            label="Overall Score"
-            score={evaluation.overallScore}
-            icon={Award}
-          />
+          {evaluation === null ? (
+            <>
+              {[1, 2, 3, 4].map((i) => (
+                <Skeleton key={i} className="h-[100px] rounded-lg" />
+              ))}
+            </>
+          ) : (
+            <>
+              <ScoreCard
+                label="Protocol Adherence"
+                score={evaluation.protocolAdherence}
+                icon={Shield}
+              />
+              <ScoreCard
+                label="Timeliness"
+                score={evaluation.timeliness}
+                icon={Clock}
+              />
+              <ScoreCard
+                label="Critical Info Captured"
+                score={evaluation.criticalInfoCapture}
+                icon={Target}
+              />
+              <ScoreCard
+                label="Overall Score"
+                score={evaluation.overallScore}
+                icon={Award}
+              />
+            </>
+          )}
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
@@ -212,22 +246,26 @@ export default function ReviewPage({
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <ul className="flex flex-col gap-2">
-                  {evaluation.missedActions.map((action, i) => (
-                    <li
-                      key={i}
-                      className="flex items-start gap-2 rounded-md border bg-destructive/5 px-3 py-2 text-sm text-foreground"
-                    >
-                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
-                      {action}
-                    </li>
-                  ))}
-                  {evaluation.missedActions.length === 0 && (
-                    <p className="py-4 text-center text-sm text-muted-foreground">
-                      No missed actions. Excellent work!
-                    </p>
-                  )}
-                </ul>
+                {evaluation === null ? (
+                  <Skeleton className="h-32 w-full rounded-md" />
+                ) : (
+                  <ul className="flex flex-col gap-2">
+                    {evaluation.missedActions.map((action, i) => (
+                      <li
+                        key={i}
+                        className="flex items-start gap-2 rounded-md border bg-destructive/5 px-3 py-2 text-sm text-foreground"
+                      >
+                        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
+                        {action}
+                      </li>
+                    ))}
+                    {evaluation.missedActions.length === 0 && (
+                      <p className="py-4 text-center text-sm text-muted-foreground">
+                        No missed actions. Excellent work!
+                      </p>
+                    )}
+                  </ul>
+                )}
               </CardContent>
             </Card>
 
@@ -240,17 +278,21 @@ export default function ReviewPage({
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <ul className="flex flex-col gap-2">
-                  {evaluation.feedbackBullets.map((fb, i) => (
-                    <li
-                      key={i}
-                      className="flex items-start gap-2 rounded-md border bg-muted/50 px-3 py-2 text-sm text-foreground"
-                    >
-                      <Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
-                      {fb}
-                    </li>
-                  ))}
-                </ul>
+                {evaluation === null ? (
+                  <Skeleton className="h-32 w-full rounded-md" />
+                ) : (
+                  <ul className="flex flex-col gap-2">
+                    {evaluation.feedbackBullets.map((fb, i) => (
+                      <li
+                        key={i}
+                        className="flex items-start gap-2 rounded-md border bg-muted/50 px-3 py-2 text-sm text-foreground"
+                      >
+                        <Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+                        {fb}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </CardContent>
             </Card>
 
@@ -311,11 +353,12 @@ export default function ReviewPage({
             <ScrollArea className="flex-1" style={{ height: "600px" }}>
               <div className="flex flex-col gap-3 p-4">
                 {filteredTranscript.map((turn) => {
-                  const isMissedMoment = evaluation.missedActions.some(
-                    (action) =>
-                      turn.text.toLowerCase().includes("address") &&
-                      action.toLowerCase().includes("callback")
-                  )
+                  const isMissedMoment =
+                    evaluation?.missedActions?.some(
+                      (action) =>
+                        turn.text.toLowerCase().includes("address") &&
+                        action.toLowerCase().includes("callback")
+                    ) ?? false
                   return (
                     <div
                       key={turn.id}
