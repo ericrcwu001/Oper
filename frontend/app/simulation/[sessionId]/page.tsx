@@ -423,7 +423,7 @@ export default function LiveSimulationPage({
         <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-xl font-bold text-foreground sm:text-2xl">
-              Live Simulation
+              Live Call
             </h1>
             <p className="text-sm text-muted-foreground">
               Session {sessionId}
@@ -513,8 +513,8 @@ export default function LiveSimulationPage({
               <div className="rounded-lg border bg-muted/50 p-3">
                 {scenarioIdFromUrl === "generated" && !scenarioPayload ? (
                   <p className="text-xs text-muted-foreground">
-                    No generated scenario in this session. Return to setup and use
-                    &quot;Generate scenario &amp; start&quot; to begin.
+                    No generated call in this session. Return to setup and use
+                    &quot;Generate call &amp; start&quot; to begin.
                   </p>
                 ) : (
                   <>
