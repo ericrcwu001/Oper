@@ -1,4 +1,6 @@
 .venv/
 node_modules/
-.cursor
-frontend/.next
+.next
+next-env.d.ts
+.env
+treehacks/backend/generated-audio/
