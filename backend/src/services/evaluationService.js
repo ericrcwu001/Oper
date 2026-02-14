@@ -1,14 +1,15 @@
 import OpenAI from 'openai';
 import { config } from '../config.js';
+import { getRelevantContext } from './ragService.js';
 
 /**
  * Evaluate operator performance from call transcript and notes using GPT-4o-mini.
- * Returns scores and feedback in the shape expected by the frontend.
+ * Uses RAG over 911 operator reference docs (ragDocs) to ground scoring and feedback.
  *
  * @param {Array<{ speaker: string, text: string, timestamp?: number }>} transcript
  * @param {Array<{ text: string, tag?: string, timestamp?: number }>} notes
  * @param {string} scenarioDescription
- * @returns {Promise<{ protocolAdherence: number, timeliness: number, criticalInfoCapture: number, overallScore: number, missedActions: string[], feedbackBullets: string[] }>}
+ * @returns {Promise<{ protocolAdherence: number, timeliness: number, criticalInfoCapture: number, overallScore: number, missedActions: string[], feedbackBullets: string[], transcriptHighlights: object[] }>}
  */
 export async function evaluateCall(transcript, notes, scenarioDescription) {
   if (!config.openai.apiKey) {
@@ -27,7 +28,16 @@ export async function evaluateCall(transcript, notes, scenarioDescription) {
           .join('\n')
       : '(No notes taken)';
 
-  const systemPrompt = `You are an expert 911 dispatch trainer. Evaluate the operator's performance based on the call transcript and the notes they took.
+  const queryForRag = `${scenarioDescription}\n\nCall transcript excerpt:\n${transcriptWithIndices.slice(0, 3000)}`;
+  let ragContext = '';
+  try {
+    ragContext = await getRelevantContext(queryForRag);
+    if (ragContext) ragContext = ragContext + '\n\n';
+  } catch (err) {
+    console.warn('RAG retrieval failed, evaluating without reference docs:', err.message);
+  }
+
+  const systemPrompt = `${ragContext}You are an expert 911 dispatch trainer. Evaluate the operator's performance based on the call transcript and the notes they took.${ragContext ? ' Use the reference material above to align scores and feedback with established 911 operator protocols and best practices.' : ''}
 Return a JSON object only, no other text, with this exact structure:
 {
   "protocolAdherence": <number 0-100>,
