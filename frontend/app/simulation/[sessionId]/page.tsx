@@ -35,6 +35,7 @@ import {
   interactWithVoice,
   assessCallTranscript,
   fetchCrimesDay,
+  fetchVehicles,
   type GeneratedScenarioPayload,
   type CallScenarioInput,
   type CrimeRecord,
@@ -50,6 +51,7 @@ import type {
 import type { MapPoint } from "@/lib/map-types"
 import { SFMap } from "@/components/sf-map"
 import { cn } from "@/lib/utils"
+import { CRIME_SIM_CLOCK_SPEEDUP } from "@/lib/simulation-constants"
 
 /** Initial map points with hardcoded popup data (no backend). */
 function getInitialMapPoints(): MapPoint[] {
@@ -230,7 +232,7 @@ export default function LiveSimulationPage({
   const [notes, setNotes] = useState<NoteEntry[]>([])
   const [mapPoints, setMapPoints] = useState<MapPoint[]>(getInitialMapPoints)
   const [selectedPointId, setSelectedPointId] = useState<string | null>(null)
-  // SF crimes feed (3x sim time, white dots, random resolve duration)
+  // SF crimes feed (configurable sim time speedup, white dots, random resolve duration)
   const [crimesFromApi, setCrimesFromApi] = useState<CrimeRecord[]>([])
   const [crimesDate, setCrimesDate] = useState<string | null>(null)
   const [crimeSimSeconds, setCrimeSimSeconds] = useState(0)
@@ -240,7 +242,9 @@ export default function LiveSimulationPage({
     units: { unit: string; rationale?: string; severity?: string }[]
     severity: string
     critical?: boolean
+    suggestedCount?: number
   } | null>(null)
+  const [isAssessingDispatch, setIsAssessingDispatch] = useState(false)
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const tick30Ref = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -256,7 +260,7 @@ export default function LiveSimulationPage({
     return () => clearTimeout(t)
   }, [])
 
-  // Fetch SF crimes for simulation day (one day from CSV, 3x playback)
+  // Fetch SF crimes for simulation day (one day from CSV, configurable speed playback)
   useEffect(() => {
     fetchCrimesDay()
       .then(({ date, crimes }) => {
@@ -268,10 +272,10 @@ export default function LiveSimulationPage({
       })
   }, [])
 
-  // 3x sim clock: every real second = 3 sim seconds; assign random resolve duration when crime appears
+  // Sim clock: every real second = CRIME_SIM_CLOCK_SPEEDUP sim seconds; assign random resolve duration when crime appears
   useEffect(() => {
     const interval = setInterval(() => {
-      const nextSim = crimeSimSecondsRef.current + 3
+      const nextSim = crimeSimSecondsRef.current + CRIME_SIM_CLOCK_SPEEDUP
       crimeSimSecondsRef.current = nextSim
       setCrimeSimSeconds(nextSim)
       const now = Date.now()
@@ -311,15 +315,42 @@ export default function LiveSimulationPage({
   }, [crimesFromApi, crimeSimSeconds, crimeResolveAt])
   crimePointsRef.current = crimeMapPoints
 
-  // 30 tps tick: update map points (animate police unit + merge crime dots)
+  // Poll backend vehicles every 1s; if we get data, show 911 + vehicles + crimes. Else keep current points (static demo).
+  useEffect(() => {
+    const POLL_MS = 1000
+    const poll = async () => {
+      try {
+        const vehicles = await fetchVehicles()
+        if (vehicles.length > 0) {
+          const initial = getInitialMapPoints()
+          const callPoint = initial.find((p) => p.type === "911")
+          const base = (callPoint ? [callPoint, ...vehicles] : vehicles) as MapPoint[]
+          setMapPoints([...base, ...crimePointsRef.current])
+        }
+        // If vehicles.length === 0, don't overwrite — keep existing mapPoints (initial or animated demo)
+      } catch {
+        // API down or CORS: leave mapPoints as-is
+      }
+    }
+    poll()
+    const id = setInterval(poll, POLL_MS)
+    return () => clearInterval(id)
+  }, [])
+
+  // 30fps tick: animate police (when no backend vehicles) and always merge current crime dots so both vehicles and crimes show
   useEffect(() => {
     const TICK_MS = 1000 / 30
     tick30Ref.current = setInterval(() => {
-      setMapPoints(() => {
+      setMapPoints((prev) => {
+        const crimes = crimePointsRef.current
+        if (prev.length > 10) {
+          // Backend vehicles active: keep vehicles/911, replace crime layer with current crimes
+          return [...prev.filter((p) => p.type !== "crime"), ...crimes]
+        }
         const base = getInitialMapPoints()
         const police = base.find((p) => p.id === "unit-p1")
         if (!police || police.type !== "police") {
-          return [...base, ...crimePointsRef.current]
+          return [...base, ...crimes]
         }
         angleRef.current += (2 * Math.PI * 0.2) / 30
         const r = 0.003
@@ -328,7 +359,7 @@ export default function LiveSimulationPage({
         const animatedBase = base.map((p) =>
           p.id === "unit-p1" ? { ...p, lat, lng } : p
         )
-        return [...animatedBase, ...crimePointsRef.current]
+        return [...animatedBase, ...crimes]
       })
     }, TICK_MS)
     return () => {
@@ -359,10 +390,11 @@ export default function LiveSimulationPage({
     setLatency(0)
   }, [callActive])
 
-  // Live eval: assess caller transcript for dispatch recommendations during the call
+  // Live eval: re-run dispatch assessment on every caller response (start call + each interact response)
   useEffect(() => {
     if (!callActive || conversationHistory.length === 0) {
       setDispatchRecommendation(null)
+      setIsAssessingDispatch(false)
       return
     }
     const callerTranscript = conversationHistory
@@ -370,10 +402,26 @@ export default function LiveSimulationPage({
       .map((t) => t.content)
       .join(" ")
       .trim()
-    if (!callerTranscript) return
+    if (!callerTranscript) {
+      setIsAssessingDispatch(false)
+      return
+    }
+    let cancelled = false
+    setIsAssessingDispatch(true)
     assessCallTranscript(callerTranscript)
-      .then(setDispatchRecommendation)
-      .catch(() => setDispatchRecommendation(null))
+      .then((res) => {
+        if (!cancelled) {
+          setDispatchRecommendation(res)
+          setIsAssessingDispatch(false)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDispatchRecommendation(null)
+          setIsAssessingDispatch(false)
+        }
+      })
+    return () => { cancelled = true }
   }, [callActive, conversationHistory])
 
   // Hint system
@@ -721,7 +769,7 @@ export default function LiveSimulationPage({
 
         {/* Map - full-width top row (from map/vehicle feature) */}
         <Card className="mb-4 overflow-hidden border bg-card shrink-0">
-          <div className="relative h-[280px] min-h-[200px] w-full">
+          <div className="relative h-[420px] min-h-[280px] w-full">
             <SFMap
               points={mapPoints}
               selectedPointId={selectedPointId}
@@ -750,7 +798,7 @@ export default function LiveSimulationPage({
                 Crime
               </span>
               {crimesDate && (
-                <span className="text-muted-foreground">Day: {crimesDate} (3×)</span>
+                <span className="text-muted-foreground">Day: {crimesDate} ({CRIME_SIM_CLOCK_SPEEDUP}×)</span>
               )}
             </div>
           </div>
@@ -831,11 +879,31 @@ export default function LiveSimulationPage({
             </Card>
 
             {/* Dispatch (live evaluation) */}
-            <Card className="shrink-0 border bg-card">
+            <Card
+              className={cn(
+                "shrink-0 border bg-card transition-shadow",
+                isAssessingDispatch && "shadow-sm ring-1 ring-primary/20"
+              )}
+            >
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-sm font-medium">
                   <Shield className="h-4 w-4 text-primary" />
                   Dispatch recommendations
+                  {callActive && (
+                    <span className="flex items-center gap-1.5 text-xs font-normal text-muted-foreground">
+                      <span
+                        className={cn(
+                          "inline-flex h-1.5 w-1.5 rounded-full",
+                          isAssessingDispatch ? "animate-pulse bg-primary" : "bg-green-500"
+                        )}
+                        />
+                      {isAssessingDispatch ? (
+                        <span className="animate-pulse">Live analyzing…</span>
+                      ) : (
+                        "Live"
+                      )}
+                    </span>
+                  )}
                 </CardTitle>
               </CardHeader>
               <CardContent className="pt-0">
@@ -843,12 +911,30 @@ export default function LiveSimulationPage({
                   <p className="text-xs text-muted-foreground">
                     Start a call to see live dispatch suggestions from the caller&apos;s words.
                   </p>
+                ) : isAssessingDispatch && !dispatchRecommendation ? (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span className="inline-flex gap-0.5">
+                      <span className="h-1 w-1 rounded-full bg-current animate-bounce [animation-delay:0ms]" />
+                      <span className="h-1 w-1 rounded-full bg-current animate-bounce [animation-delay:150ms]" />
+                      <span className="h-1 w-1 rounded-full bg-current animate-bounce [animation-delay:300ms]" />
+                    </span>
+                    Analyzing caller…
+                  </div>
                 ) : !dispatchRecommendation ? (
                   <p className="text-xs text-muted-foreground">
                     Updates as the caller speaks. Keywords like &quot;fire&quot; or &quot;not breathing&quot; trigger suggestions.
                   </p>
                 ) : (
                   <div className="space-y-2">
+                    {dispatchRecommendation.suggestedCount != null && (
+                      <p className="text-xs font-medium text-foreground">
+                        Suggest sending{" "}
+                        <span className="text-primary font-semibold">
+                          {dispatchRecommendation.suggestedCount} unit
+                          {dispatchRecommendation.suggestedCount !== 1 ? "s" : ""}
+                        </span>
+                      </p>
+                    )}
                     <p className="text-xs text-muted-foreground">
                       Severity:{" "}
                       <span

@@ -26,6 +26,7 @@ export interface InteractResponse {
 }
 
 import type { ScenarioPayload } from "@/lib/types"
+import type { MapPoint } from "@/lib/map-types"
 
 /** Full scenario payload from POST /api/scenarios/generate (backend scenarioGenerator). */
 export interface GeneratedScenarioPayload {
@@ -77,6 +78,17 @@ export type CallScenarioInput =
 /**
  * Generate a new scenario from the backend (POST /api/scenarios/generate).
  */
+/**
+ * Fetch current simulated vehicle positions (GET /api/vehicles).
+ * Returns MapPoint-compatible array; empty if simulation not running or unavailable.
+ */
+export async function fetchVehicles(): Promise<MapPoint[]> {
+  const res = await fetch(`${API_BASE}/api/vehicles`)
+  if (!res.ok) return []
+  const data = await res.json()
+  return (Array.isArray(data) ? data : []) as MapPoint[]
+}
+
 export async function generateScenario(
   difficulty: "easy" | "medium" | "hard"
 ): Promise<GeneratedScenarioPayload> {
@@ -243,6 +255,8 @@ export interface AssessCallTranscriptResponse {
   units: { unit: string; rationale?: string; severity?: string }[]
   severity: string
   critical?: boolean
+  /** Suggested number of units when inferred from transcript (e.g. "two people down" -> 2). */
+  suggestedCount?: number
 }
 
 /**
