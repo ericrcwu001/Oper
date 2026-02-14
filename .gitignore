@@ -10,3 +10,4 @@ treehacks/backend/generated-audio/
 
 # Simulated vehicle positions (runtime output)
 backend/data/vehicle-positions.json
+.pmtiles-cli/
