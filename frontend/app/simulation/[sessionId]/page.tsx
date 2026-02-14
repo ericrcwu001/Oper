@@ -176,6 +176,14 @@ export default function LiveSimulationPage({
     setPartialText("")
     setCallerAudioUrl(null)
     setConversationHistory([])
+    try {
+      sessionStorage.setItem(
+        `simulation-transcript-${sessionId}`,
+        JSON.stringify(transcript)
+      )
+    } catch {
+      // ignore storage errors
+    }
     router.push(`/simulation/${sessionId}/review?scenario=${scenarioId}`)
   }
 
