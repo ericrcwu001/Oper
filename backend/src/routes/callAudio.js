@@ -167,7 +167,6 @@ router.post('/generate-call-audio', async (req, res) => {
       callTimestampSeconds,
       eventsSinceLastResponse
     );
-
     // 2. Convert dialog to audio (ElevenLabs); voiceOptions = string (legacy) or scenario generator payload (voice + persona settings)
     const id = randomUUID();
     const filenameMp3 = `${id}.mp3`;
