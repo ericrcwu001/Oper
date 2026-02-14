@@ -82,7 +82,7 @@ export type CallScenarioInput =
  * Returns MapPoint-compatible array; empty if simulation not running or unavailable.
  */
 export async function fetchVehicles(): Promise<
-  { id: string; type: string; lat: number; lng: number; unitId?: string; status?: string }[]
+  { id: string; type: string; lat: number; lng: number; unitId?: string; officerInCharge?: string; status?: boolean }[]
 > {
   const res = await fetch(`${API_BASE}/api/vehicles`)
   if (!res.ok) return []

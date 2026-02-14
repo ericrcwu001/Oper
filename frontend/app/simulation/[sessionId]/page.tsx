@@ -72,7 +72,7 @@ function getInitialMapPoints(): MapPoint[] {
       location: "Mission District",
       officerInCharge: "Sgt. Smith",
       unitId: "PD-12",
-      status: "En route",
+      status: true,
     },
     {
       id: "unit-f1",
@@ -82,7 +82,7 @@ function getInitialMapPoints(): MapPoint[] {
       location: "SOMA",
       officerInCharge: "Capt. Jones",
       unitId: "FD-7",
-      status: "Standing by",
+      status: false,
     },
   ]
 }

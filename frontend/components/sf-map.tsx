@@ -227,7 +227,17 @@ export function SFMap({
             { label: "Location", value: point.location },
             { label: "Officer in charge", value: point.officerInCharge },
             { label: "Unit ID", value: point.unitId },
-            { label: "Status", value: point.status },
+            {
+              label: "Status",
+              value:
+                typeof point.status === "string"
+                  ? point.status
+                  : point.status === true
+                    ? "En route"
+                    : point.status === false
+                      ? "Idle"
+                      : "Unknown",
+            },
           ]
 
       const content = document.createElement("div")
