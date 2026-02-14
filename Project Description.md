@@ -64,7 +64,7 @@ Frontend
 React + TailwindCSS
 Live audio interface, notes input, dashboard
 Backend
-Flask
+Express (Node.js)
 REST APIs, scenario & evaluation engine
 AI Models
 OpenAI GPT
