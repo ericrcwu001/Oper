@@ -14,9 +14,8 @@ import { Button } from "@/components/ui/button"
 import { useState } from "react"
 
 const navItems = [
-  { href: "/", label: "Home", icon: Radio },
-  { href: "/simulation", label: "Simulate", icon: Phone },
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/simulation", label: "Simulate", icon: Phone },
 ]
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -27,7 +26,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-50 border-b bg-card/80 backdrop-blur-md">
         <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 lg:px-6">
-          <Link href="/" className="flex items-center gap-2">
+          <Link href="/dashboard" className="flex items-center gap-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
               <Radio className="h-4 w-4 text-primary-foreground" />
             </div>
@@ -38,10 +37,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           <nav className="hidden items-center gap-1 md:flex">
             {navItems.map((item) => {
-              const isActive =
-                item.href === "/"
-                  ? pathname === "/"
-                  : pathname.startsWith(item.href)
+              const isActive = pathname === item.href || pathname.startsWith(item.href + "/")
               return (
                 <Link
                   key={item.href}
@@ -78,10 +74,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {mobileOpen && (
           <nav className="border-t bg-card px-4 pb-4 pt-2 md:hidden">
             {navItems.map((item) => {
-              const isActive =
-                item.href === "/"
-                  ? pathname === "/"
-                  : pathname.startsWith(item.href)
+              const isActive = pathname === item.href || pathname.startsWith(item.href + "/")
               return (
                 <Link
                   key={item.href}
