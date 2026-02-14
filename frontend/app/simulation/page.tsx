@@ -3,7 +3,6 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { AppShell } from "@/components/app-shell"
-import { ScenarioCard } from "@/components/scenario-card"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
@@ -14,28 +13,37 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { scenarios } from "@/lib/mock-data"
 import type { Difficulty, Language } from "@/lib/types"
-import { ArrowRight, Settings2 } from "lucide-react"
+import { generateScenario } from "@/lib/api"
+import { ArrowRight, Settings2, Loader2, AlertCircle } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
 export default function SimulationSetupPage() {
   const router = useRouter()
-  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [difficulty, setDifficulty] = useState<Difficulty>("medium")
   const [language, setLanguage] = useState<Language>("en")
   const [enableHints, setEnableHints] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const handleStart = async () => {
-    if (!selectedId) return
     setLoading(true)
-    // Mock POST to create session
-    await new Promise((resolve) => setTimeout(resolve, 600))
-    const sessionId = `sim-${Date.now()}`
-    router.push(
-      `/simulation/${sessionId}?scenario=${selectedId}&difficulty=${difficulty}&language=${language}&hints=${enableHints}`
-    )
+    setError(null)
+    try {
+      const payload = await generateScenario(difficulty)
+      const sessionId = `sim-${Date.now()}`
+      sessionStorage.setItem(
+        `simulation-generated-scenario-${sessionId}`,
+        JSON.stringify(payload)
+      )
+      router.push(
+        `/simulation/${sessionId}?difficulty=${difficulty}&language=${language}&hints=${enableHints}`
+      )
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to generate scenario")
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -46,26 +54,23 @@ export default function SimulationSetupPage() {
             Scenario Setup
           </h1>
           <p className="mt-2 text-muted-foreground">
-            Choose an emergency scenario and configure your simulation
-            settings.
+            Choose difficulty and we’ll generate a unique emergency scenario for
+            your call simulation.
           </p>
         </div>
 
         <div className="grid gap-8 lg:grid-cols-3">
           <div className="lg:col-span-2">
-            <h2 className="mb-4 text-sm font-medium uppercase tracking-wider text-muted-foreground">
-              Select Scenario
-            </h2>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {scenarios.map((s) => (
-                <ScenarioCard
-                  key={s.id}
-                  scenario={s}
-                  selected={selectedId === s.id}
-                  onSelect={() => setSelectedId(s.id)}
-                />
-              ))}
-            </div>
+            <Card className="border bg-card">
+              <CardContent className="pt-6">
+                <p className="text-muted-foreground">
+                  When you start, the app will generate a new scenario (e.g.
+                  cardiac arrest, fire, traffic accident, domestic dispute)
+                  tailored to your chosen difficulty. The AI caller will behave
+                  according to that scenario during the simulation.
+                </p>
+              </CardContent>
+            </Card>
           </div>
 
           <div>
@@ -124,14 +129,30 @@ export default function SimulationSetupPage() {
                   />
                 </div>
 
+                {error && (
+                  <div className="flex items-center gap-2 rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    {error}
+                  </div>
+                )}
+
                 <Button
                   size="lg"
                   className="mt-2 w-full gap-2"
-                  disabled={!selectedId || loading}
+                  disabled={loading}
                   onClick={handleStart}
                 >
-                  {loading ? "Starting..." : "Start Simulation"}
-                  {!loading && <ArrowRight className="h-4 w-4" />}
+                  {loading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Generating scenario…
+                    </>
+                  ) : (
+                    <>
+                      Start Simulation
+                      <ArrowRight className="h-4 w-4" />
+                    </>
+                  )}
                 </Button>
               </CardContent>
             </Card>

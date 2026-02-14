@@ -26,7 +26,12 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { scenarios, callerScripts } from "@/lib/mock-data"
 import { evaluateCall } from "@/lib/api"
-import type { TranscriptTurn, Evaluation, NoteEntry } from "@/lib/types"
+import type {
+  TranscriptTurn,
+  Evaluation,
+  NoteEntry,
+  TranscriptHighlight,
+} from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 // Generate a mock evaluation
@@ -90,6 +95,8 @@ function formatTs(sec: number) {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
 }
 
+const STORAGE_KEY_GENERATED = "simulation-generated-scenario"
+
 export default function ReviewPage({
   params,
 }: {
@@ -97,39 +104,57 @@ export default function ReviewPage({
 }) {
   const { sessionId } = use(params)
   const searchParams = useSearchParams()
-  const scenarioId = searchParams.get("scenario") || "scenario-1"
-  const scenario = scenarios.find((s) => s.id === scenarioId) || scenarios[0]
+  const scenarioIdFromUrl = searchParams.get("scenario")
+
+  const [scenario, setScenario] = useState(() =>
+    scenarios.find((s) => s.id === (scenarioIdFromUrl || "scenario-1")) || scenarios[0]
+  )
+
+  useEffect(() => {
+    try {
+      if (typeof window === "undefined") return
+      const raw = sessionStorage.getItem(`${STORAGE_KEY_GENERATED}-${sessionId}`)
+      if (raw) {
+        const payload = JSON.parse(raw) as {
+          scenario?: { title?: string; description?: string }
+        }
+        if (payload?.scenario?.title != null) {
+          setScenario((prev) => ({
+            ...prev,
+            title: payload.scenario!.title,
+            description: payload.scenario!.description ?? prev.description,
+          }))
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, [sessionId])
 
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null)
-  const [reviewTranscript] = useState<TranscriptTurn[]>(() => {
-    try {
-      if (typeof window !== "undefined") {
-        const raw = sessionStorage.getItem(`simulation-transcript-${sessionId}`)
-        if (raw) {
-          const parsed = JSON.parse(raw) as TranscriptTurn[]
-          if (Array.isArray(parsed)) return parsed
-        }
-      }
-    } catch {
-      // ignore
-    }
-    return generateReviewTranscript(scenario.scenarioType)
-  })
+  const [reviewTranscript, setReviewTranscript] = useState<TranscriptTurn[]>(
+    () => generateReviewTranscript(scenario.scenarioType)
+  )
   const [searchQuery, setSearchQuery] = useState("")
-  const [reviewNotes] = useState<NoteEntry[]>(() => {
+  const [reviewNotes, setReviewNotes] = useState<NoteEntry[]>([])
+
+  useEffect(() => {
     try {
-      if (typeof window !== "undefined") {
-        const raw = sessionStorage.getItem(`simulation-notes-${sessionId}`)
-        if (raw) {
-          const parsed = JSON.parse(raw) as NoteEntry[]
-          if (Array.isArray(parsed)) return parsed
-        }
+      if (typeof window === "undefined") return
+      const rawT = sessionStorage.getItem(`simulation-transcript-${sessionId}`)
+      if (rawT) {
+        const parsed = JSON.parse(rawT) as TranscriptTurn[]
+        if (Array.isArray(parsed)) setReviewTranscript(parsed)
+      }
+      const rawN = sessionStorage.getItem(`simulation-notes-${sessionId}`)
+      if (rawN) {
+        const parsed = JSON.parse(rawN) as NoteEntry[]
+        if (Array.isArray(parsed)) setReviewNotes(parsed)
       }
     } catch {
       // ignore
     }
-    return []
-  })
+  }, [sessionId])
 
   useEffect(() => {
     if (reviewTranscript.length === 0) {
@@ -180,7 +205,7 @@ export default function ReviewPage({
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" asChild className="gap-2">
-              <Link href={`/simulation/${sessionId}?scenario=${scenarioId}`}>
+              <Link href={`/simulation/${sessionId}?scenario=${scenario.id}`}>
                 <RotateCcw className="h-4 w-4" />
                 Retry
               </Link>
@@ -353,12 +378,14 @@ export default function ReviewPage({
             <ScrollArea className="flex-1" style={{ height: "600px" }}>
               <div className="flex flex-col gap-3 p-4">
                 {filteredTranscript.map((turn) => {
-                  const isMissedMoment =
-                    evaluation?.missedActions?.some(
-                      (action) =>
-                        turn.text.toLowerCase().includes("address") &&
-                        action.toLowerCase().includes("callback")
-                    ) ?? false
+                  const turnIndex = reviewTranscript.findIndex(
+                    (t) => t.id === turn.id
+                  )
+                  const highlights: TranscriptHighlight[] =
+                    evaluation?.transcriptHighlights?.filter(
+                      (h) => h.turnIndex === turnIndex
+                    ) ?? []
+                  const hasHighlights = highlights.length > 0
                   return (
                     <div
                       key={turn.id}
@@ -385,14 +412,6 @@ export default function ReviewPage({
                             ? "Caller"
                             : "Operator"}
                         </span>
-                        {isMissedMoment && (
-                          <Badge
-                            variant="destructive"
-                            className="text-[10px]"
-                          >
-                            Missed moment
-                          </Badge>
-                        )}
                       </div>
                       <div
                         className={cn(
@@ -404,11 +423,65 @@ export default function ReviewPage({
                             turn.text
                               .toLowerCase()
                               .includes(searchQuery.toLowerCase()) &&
-                            "ring-2 ring-primary/50"
+                            "ring-2 ring-primary/50",
+                          hasHighlights && "ring-2 ring-offset-1 ring-offset-background",
+                          hasHighlights &&
+                            highlights.some((h) => h.type === "missed_action") &&
+                            "ring-destructive/60",
+                          hasHighlights &&
+                            !highlights.some((h) => h.type === "missed_action") &&
+                            highlights.some((h) => h.type === "red_flag") &&
+                            "ring-[hsl(var(--warning))]/60",
+                          hasHighlights &&
+                            highlights.every(
+                              (h) => h.type === "improvement"
+                            ) &&
+                            "ring-primary/40"
                         )}
                       >
                         {turn.text}
                       </div>
+                      {hasHighlights && (
+                        <div
+                          className={cn(
+                            "flex flex-wrap gap-1.5",
+                            turn.speaker === "operator"
+                              ? "justify-end"
+                              : "justify-start"
+                          )}
+                        >
+                          {highlights.map((h, i) => (
+                            <div
+                              key={i}
+                              className="flex flex-col gap-0.5 rounded-md border bg-muted/50 px-2 py-1.5 text-left"
+                            >
+                              <span
+                                className={cn(
+                                  "text-[10px] font-medium uppercase tracking-wide",
+                                  h.type === "missed_action" &&
+                                    "text-destructive",
+                                  h.type === "red_flag" &&
+                                    "text-[hsl(var(--warning))]",
+                                  h.type === "improvement" &&
+                                    "text-primary"
+                                )}
+                              >
+                                {h.type === "missed_action" && "Missed"}
+                                {h.type === "red_flag" && "Red flag"}
+                                {h.type === "improvement" && "Improvement"}
+                              </span>
+                              <span className="text-xs font-medium text-foreground">
+                                {h.label}
+                              </span>
+                              {h.detail && (
+                                <span className="text-[10px] leading-snug text-muted-foreground">
+                                  {h.detail}
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )
                 })}

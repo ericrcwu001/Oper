@@ -6,6 +6,19 @@ import { config } from '../config.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
+ * Strip leading speaker labels so TTS does not read them aloud (e.g. "[Caller]:", "Caller:").
+ * @param {string} text
+ * @returns {string}
+ */
+function sanitizeForTts(text) {
+  if (typeof text !== 'string') return '';
+  return text
+    .replace(/^\s*\[?(?:Caller|Operator)\]?\s*:\s*/i, '')
+    .replace(/^\s*\[(?:Caller|Operator)\]\s*/i, '')
+    .trim();
+}
+
+/**
  * Converts transcript text to speech using ElevenLabs TTS and saves to a file.
  * Returns the path to the saved file (relative to project root) and the public URL.
  *
@@ -20,6 +33,7 @@ export async function textToSpeech(text, filename) {
     );
   }
 
+  const cleanedText = sanitizeForTts(text);
   const { voiceId, modelId, outputFormat } = config.elevenlabs;
   const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=${outputFormat}`;
 
@@ -31,7 +45,7 @@ export async function textToSpeech(text, filename) {
       Accept: 'audio/mpeg',
     },
     body: JSON.stringify({
-      text,
+      text: cleanedText || '.',
       model_id: modelId,
     }),
   });
