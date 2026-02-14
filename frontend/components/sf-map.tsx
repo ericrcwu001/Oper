@@ -12,7 +12,7 @@ import {
   MAP_POINT_COLORS,
   MAP_POINT_OUTLINE_COLOR,
   MAP_POINT_RADIUS_BY_ZOOM,
-  MAP_POINT_SELECTED_RADIUS_OFFSET,
+  MAP_POINT_RADIUS_SELECTED_BY_ZOOM,
 } from "@/lib/map-constants"
 import { getSFMapStyle } from "@/lib/map-style"
 
@@ -43,6 +43,7 @@ function pointsToGeoJSON(points: MapPoint[]): GeoJSON.FeatureCollection {
 
 const POINTS_SOURCE_ID = "map-points"
 const POINTS_LAYER_ID = "map-points-circles"
+const POINTS_LAYER_SELECTED_ID = "map-points-circles-selected"
 
 export interface SFMapProps {
   points: MapPoint[]
@@ -112,6 +113,7 @@ export function SFMap({
       if (map.getSource(POINTS_SOURCE_ID)) return
 
       const flatRadius = MAP_POINT_RADIUS_BY_ZOOM.flat()
+      const flatRadiusSelected = MAP_POINT_RADIUS_SELECTED_BY_ZOOM.flat()
       const withSelection = (pointsRef.current ?? []).map((p) => ({
         ...p,
         selected: p.id === (selectedPointIdRef.current ?? null),
@@ -121,37 +123,51 @@ export function SFMap({
         data: pointsToGeoJSON(withSelection),
       })
 
+      const paintBase = {
+        "circle-color": [
+          "case",
+          ["get", "disabled"],
+          "rgba(107, 114, 128, 0.4)",
+          [
+            "match",
+            ["get", "type"],
+            "911",
+            MAP_POINT_COLORS["911"],
+            "police",
+            MAP_POINT_COLORS.police,
+            "fire",
+            MAP_POINT_COLORS.fire,
+            "ambulance",
+            MAP_POINT_COLORS.ambulance,
+            "#9ca3af",
+          ],
+        ],
+        "circle-stroke-width": 1.8,
+        "circle-stroke-color": MAP_POINT_OUTLINE_COLOR,
+        "circle-opacity": ["case", ["get", "disabled"], 0.4, 0.98],
+      }
+
+      // Unselected: zoom must be top-level in interpolate (MapLibre requirement)
       map.addLayer({
         id: POINTS_LAYER_ID,
         type: "circle",
         source: POINTS_SOURCE_ID,
+        filter: ["!", ["get", "selected"]],
         paint: {
-          "circle-color": [
-            "case",
-            ["get", "disabled"],
-            "rgba(107, 114, 128, 0.4)",
-            [
-              "match",
-              ["get", "type"],
-              "911",
-              MAP_POINT_COLORS["911"],
-              "police",
-              MAP_POINT_COLORS.police,
-              "fire",
-              MAP_POINT_COLORS.fire,
-              "ambulance",
-              MAP_POINT_COLORS.ambulance,
-              "#9ca3af",
-            ],
-          ],
-          "circle-radius": [
-            "+",
-            ["interpolate", ["linear"], ["zoom"], ...flatRadius],
-            ["case", ["get", "selected"], MAP_POINT_SELECTED_RADIUS_OFFSET, 0],
-          ],
-          "circle-stroke-width": 1.8,
-          "circle-stroke-color": MAP_POINT_OUTLINE_COLOR,
-          "circle-opacity": ["case", ["get", "disabled"], 0.4, 0.98],
+          ...paintBase,
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatRadius],
+        },
+      })
+
+      // Selected: same, separate layer so radius uses only top-level interpolate
+      map.addLayer({
+        id: POINTS_LAYER_SELECTED_ID,
+        type: "circle",
+        source: POINTS_SOURCE_ID,
+        filter: ["get", "selected"],
+        paint: {
+          ...paintBase,
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatRadiusSelected],
         },
       })
       setPointsLayerReady(true)
@@ -258,7 +274,7 @@ export function SFMap({
 
     const handleClick = (e: maplibregl.MapMouseEvent) => {
       const features = map.queryRenderedFeatures(e.point, {
-        layers: [POINTS_LAYER_ID],
+        layers: [POINTS_LAYER_ID, POINTS_LAYER_SELECTED_ID],
       })
       if (features.length === 0) return
       const feature = features[0]
@@ -284,7 +300,7 @@ export function SFMap({
 
     const handleMouseMove = (e: maplibregl.MapMouseEvent) => {
       const features = map.queryRenderedFeatures(e.point, {
-        layers: [POINTS_LAYER_ID],
+        layers: [POINTS_LAYER_ID, POINTS_LAYER_SELECTED_ID],
       })
       map.getCanvas().style.cursor = features.length > 0 ? "pointer" : ""
     }

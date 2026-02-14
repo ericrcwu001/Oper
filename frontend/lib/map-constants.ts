@@ -30,6 +30,13 @@ export const MAP_POINT_RADIUS_BY_ZOOM: [number, number][] = [
   [16, 7],
 ]
 
+/** Zoom → radius for selected points (base + offset). Used in a separate layer so zoom stays top-level. */
+export const MAP_POINT_RADIUS_SELECTED_BY_ZOOM: [number, number][] = [
+  [11, 5.5],
+  [14, 7.5],
+  [16, 9.5],
+]
+
 /** Extra radius when point is selected (px). */
 export const MAP_POINT_SELECTED_RADIUS_OFFSET = 2.5
 

@@ -575,7 +575,7 @@ export default function LiveSimulationPage({
 
   return (
     <AppShell>
-      <div className="flex flex-col px-4 pb-8 lg:px-6">
+      <div className="flex h-[calc(100vh-3.5rem)] flex-col px-4 lg:px-6">
         {/* Compact header */}
         <div className="flex shrink-0 items-center justify-between gap-4 border-b py-3">
           <div className="flex min-w-0 items-center gap-3">
@@ -650,15 +650,14 @@ export default function LiveSimulationPage({
         )}
 
         {/* Map - full-width top row (from map/vehicle feature) */}
-        <Card className="mb-4 overflow-hidden border bg-card">
-          <div className="relative h-[600px] min-h-[400px] w-full">
+        <Card className="mb-4 overflow-hidden border bg-card shrink-0">
+          <div className="relative h-[280px] min-h-[200px] w-full">
             <SFMap
               points={mapPoints}
               selectedPointId={selectedPointId}
               onSelectPoint={setSelectedPointId}
               className="absolute inset-0 h-full w-full"
             />
-            {/* Legend */}
             <div className="absolute bottom-3 left-3 z-10 flex gap-4 rounded-md border border-border/80 bg-card/95 px-3 py-2 text-xs shadow-sm backdrop-blur">
               <span className="flex items-center gap-1.5">
                 <span className="h-2.5 w-2.5 rounded-full bg-[#EF4444]" aria-hidden />

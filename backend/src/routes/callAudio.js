@@ -6,7 +6,7 @@ import { generateCallDialog, getNextCallerResponse } from '../services/openaiSer
 import { textToSpeech, sanitizeCallerResponseText } from '../services/elevenlabsService.js';
 import { speechToText } from '../services/whisperService.js';
 import { evaluateCall } from '../services/evaluationService.js';
-import { processCaller911, convertMp3ToWav } from '../utils/911audio.js';
+import { processCaller911, convertMp3ToWav, convertWebmToWav } from '../utils/911audio.js';
 import { config } from '../config.js';
 
 const router = Router();
@@ -77,7 +77,10 @@ async function apply911PipelineOrFallback(id, mp3Path) {
     };
   } catch (err) {
     if (err.code === 'ENOENT' || err.message?.includes('spawn ffmpeg')) {
-      console.warn('ffmpeg not found or failed; serving original TTS audio. Install ffmpeg for 911 phone effect.');
+      console.warn(
+        'ffmpeg not found or failed; serving original TTS audio. Install ffmpeg for 911 phone effect. ' +
+        'On Windows, if you just ran "winget install ffmpeg", close this terminal and open a new one so PATH updates.'
+      );
     } else {
       console.warn('911 audio processing failed:', err.message);
     }
@@ -267,8 +270,22 @@ router.post('/interact', async (req, res) => {
           error: 'Invalid "userInputAudio": decoded audio is empty.',
         });
       }
-      const transcribed = await speechToText(buffer, 'operator-audio.webm');
-      operatorMessage = transcribed || operatorMessage;
+      try {
+        // Whisper often rejects browser WebM/Opus; convert to WAV with ffmpeg
+        const wavBuffer = await convertWebmToWav(buffer);
+        operatorMessage = (await speechToText(wavBuffer, 'operator-audio.wav')) || operatorMessage;
+      } catch (convErr) {
+        const msg = convErr?.message || '';
+        const needsFfmpeg = msg.includes('ENOENT') || msg.includes('spawn ffmpeg') || msg.includes('exited');
+        if (needsFfmpeg) {
+          return res.status(400).json({
+            error: 'Voice input requires ffmpeg to convert browser audio for Whisper. Install ffmpeg on your system, or use text input instead.',
+          });
+        }
+        return res.status(400).json({
+          error: 'Voice conversion failed: ' + (msg || 'unknown error'),
+        });
+      }
     }
     if (!operatorMessage) {
       return res.status(400).json({

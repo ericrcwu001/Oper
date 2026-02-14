@@ -38,4 +38,7 @@ export const config = {
   rag: {
     docsDir: process.env.RAG_DOCS_DIR || 'ragDocs',
   },
+
+  /** Optional: full path to ffmpeg executable (e.g. for Windows when not on PATH). */
+  ffmpegPath: process.env.FFMPEG_PATH || null,
 };
