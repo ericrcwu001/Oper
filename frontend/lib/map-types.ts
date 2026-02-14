@@ -1,5 +1,5 @@
-/** Point type for map markers (911 call vs police/fire/ambulance). */
-export type MapPointType = "911" | "police" | "fire" | "ambulance"
+/** Point type for map markers (911 call vs police/fire/ambulance vs crime dot). */
+export type MapPointType = "911" | "police" | "fire" | "ambulance" | "crime"
 
 /** Optional popup fields for 911 calls. */
 export interface MapPoint911Popup {

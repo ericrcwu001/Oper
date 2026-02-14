@@ -265,3 +265,34 @@ export async function assessCallTranscript(
   }
   return res.json() as Promise<AssessCallTranscriptResponse>
 }
+
+/** One crime from GET /api/crimes (SF CSV, time-ordered for 3x sim). */
+export interface CrimeRecord {
+  id: string
+  lat: number
+  lng: number
+  simSecondsFromMidnight: number
+  category?: string
+  address?: string
+  description?: string
+}
+
+/**
+ * Fetch crimes for a simulation day (GET /api/crimes?date=YYYY-MM-DD).
+ * If date is omitted, backend returns a random day from the dataset.
+ */
+export async function fetchCrimesDay(
+  date?: string
+): Promise<{ date: string; crimes: CrimeRecord[] }> {
+  const url = date
+    ? `${API_BASE}/api/crimes?date=${encodeURIComponent(date)}`
+    : `${API_BASE}/api/crimes`
+  const res = await fetch(url)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(
+      (err as { error?: string }).error ?? "Failed to load crimes"
+    )
+  }
+  return res.json() as Promise<{ date: string; crimes: CrimeRecord[] }>
+}

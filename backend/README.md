@@ -1,6 +1,6 @@
 # 911 Call Simulation Backend
 
-Node.js/Express backend for the AI Emergency Response Simulator. Generates emergency call audio from a scenario using OpenAI (dialog + Whisper for STT) and ElevenLabs (TTS). Supports live back-and-forth interaction via `/interact`.
+Node.js/Express backend for the AI Emergency Response Simulator. Generates emergency call audio from a scenario using OpenAI (dialog + Whisper for STT) and **OpenAI TTS by default** (fast `tts-1` model; voice and speed reflect caller gender, age, and emotion). Optional ElevenLabs TTS when `TTS_PROVIDER=elevenlabs`. Supports live back-and-forth interaction via `/interact`.
 
 ## Setup
 
@@ -13,8 +13,9 @@ Node.js/Express backend for the AI Emergency Response Simulator. Generates emerg
 2. **API keys (required)**
 
    - Copy `.env.example` to `.env`.
-   - Set `OPENAI_API_KEY` ([OpenAI API keys](https://platform.openai.com/api-keys)).
-   - Set `ELEVENLABS_API_KEY` ([ElevenLabs API keys](https://elevenlabs.io/app/settings/api-keys)).
+   - Set `OPENAI_API_KEY` ([OpenAI API keys](https://platform.openai.com/api-keys)) — used for dialog, Whisper STT, and **TTS by default**.
+   - For **ElevenLabs TTS** instead: set `TTS_PROVIDER=elevenlabs` and `ELEVENLABS_API_KEY` ([ElevenLabs API keys](https://elevenlabs.io/app/settings/api-keys)).
+   - Optional: `OPENAI_TTS_MODEL` — `tts-1` (default, fast/cheap), `tts-1-hd` (higher quality), or `gpt-4o-mini-tts` (adds emotion/tone via instructions: panicked, stressed, calm).
 
 3. **Run the server**
 

@@ -18,6 +18,7 @@ export const MAP_POINT_COLORS: Record<MapPointType, string> = {
   police: "#3B82F6",
   fire: "#F97316",
   ambulance: "#22C55E",
+  crime: "#FFFFFF",
 }
 
 /** Outline color for points (matches map background). */

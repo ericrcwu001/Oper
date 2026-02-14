@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, use } from "react"
+import { useState, useEffect, useRef, useMemo, use } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { AppShell } from "@/components/app-shell"
 import { TranscriptFeed } from "@/components/transcript-feed"
@@ -34,8 +34,10 @@ import {
   interact,
   interactWithVoice,
   assessCallTranscript,
+  fetchCrimesDay,
   type GeneratedScenarioPayload,
   type CallScenarioInput,
+  type CrimeRecord,
 } from "@/lib/api"
 import type {
   TranscriptTurn,
@@ -228,6 +230,12 @@ export default function LiveSimulationPage({
   const [notes, setNotes] = useState<NoteEntry[]>([])
   const [mapPoints, setMapPoints] = useState<MapPoint[]>(getInitialMapPoints)
   const [selectedPointId, setSelectedPointId] = useState<string | null>(null)
+  // SF crimes feed (3x sim time, white dots, random resolve duration)
+  const [crimesFromApi, setCrimesFromApi] = useState<CrimeRecord[]>([])
+  const [crimesDate, setCrimesDate] = useState<string | null>(null)
+  const [crimeSimSeconds, setCrimeSimSeconds] = useState(0)
+  const [crimeResolveAt, setCrimeResolveAt] = useState<Record<string, number>>({})
+  const crimePointsRef = useRef<MapPoint[]>([])
   const [dispatchRecommendation, setDispatchRecommendation] = useState<{
     units: { unit: string; rationale?: string; severity?: string }[]
     severity: string
@@ -237,6 +245,10 @@ export default function LiveSimulationPage({
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const tick30Ref = useRef<ReturnType<typeof setInterval> | null>(null)
   const angleRef = useRef(0)
+  const crimeSimSecondsRef = useRef(0)
+  const crimesFromApiRef = useRef<CrimeRecord[]>([])
+  crimeSimSecondsRef.current = crimeSimSeconds
+  crimesFromApiRef.current = crimesFromApi
 
   // Simulated loading
   useEffect(() => {
@@ -244,21 +256,79 @@ export default function LiveSimulationPage({
     return () => clearTimeout(t)
   }, [])
 
-  // 30 tps tick: update map points (animate police unit in small circle for live demo)
+  // Fetch SF crimes for simulation day (one day from CSV, 3x playback)
+  useEffect(() => {
+    fetchCrimesDay()
+      .then(({ date, crimes }) => {
+        setCrimesDate(date)
+        setCrimesFromApi(crimes)
+      })
+      .catch(() => {
+        setCrimesFromApi([])
+      })
+  }, [])
+
+  // 3x sim clock: every real second = 3 sim seconds; assign random resolve duration when crime appears
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const nextSim = crimeSimSecondsRef.current + 3
+      crimeSimSecondsRef.current = nextSim
+      setCrimeSimSeconds(nextSim)
+      const now = Date.now()
+      const crimes = crimesFromApiRef.current
+      setCrimeResolveAt((prev) => {
+        const next = { ...prev }
+        for (const c of crimes) {
+          if (c.simSecondsFromMidnight <= nextSim && !(c.id in next)) {
+            next[c.id] = now + 8000 + Math.random() * 17000
+          }
+        }
+        for (const id of Object.keys(next)) {
+          if (now >= next[id]) delete next[id]
+        }
+        return next
+      })
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // Visible crimes as map points (white dots): sim time passed + not yet resolved (random duration)
+  const crimeMapPoints = useMemo(() => {
+    const now = Date.now()
+    return crimesFromApi.filter(
+      (c) =>
+        c.simSecondsFromMidnight <= crimeSimSeconds &&
+        (!(c.id in crimeResolveAt) || now < crimeResolveAt[c.id])
+    ).map((c) => ({
+      id: c.id,
+      type: "crime" as const,
+      lat: c.lat,
+      lng: c.lng,
+      location: c.category,
+      description: c.address,
+      callerId: c.description,
+    }))
+  }, [crimesFromApi, crimeSimSeconds, crimeResolveAt])
+  crimePointsRef.current = crimeMapPoints
+
+  // 30 tps tick: update map points (animate police unit + merge crime dots)
   useEffect(() => {
     const TICK_MS = 1000 / 30
     tick30Ref.current = setInterval(() => {
-      setMapPoints((prev) => {
+      setMapPoints(() => {
         const base = getInitialMapPoints()
         const police = base.find((p) => p.id === "unit-p1")
-        if (!police || police.type !== "police") return prev
+        if (!police || police.type !== "police") {
+          return [...base, ...crimePointsRef.current]
+        }
         angleRef.current += (2 * Math.PI * 0.2) / 30
         const r = 0.003
         const lat = 37.78 + r * Math.sin(angleRef.current)
         const lng = -122.41 + r * Math.cos(angleRef.current)
-        return base.map((p) =>
+        const animatedBase = base.map((p) =>
           p.id === "unit-p1" ? { ...p, lat, lng } : p
         )
+        return [...animatedBase, ...crimePointsRef.current]
       })
     }, TICK_MS)
     return () => {
@@ -658,7 +728,7 @@ export default function LiveSimulationPage({
               onSelectPoint={setSelectedPointId}
               className="absolute inset-0 h-full w-full"
             />
-            <div className="absolute bottom-3 left-3 z-10 flex gap-4 rounded-md border border-border/80 bg-card/95 px-3 py-2 text-xs shadow-sm backdrop-blur">
+            <div className="absolute bottom-3 left-3 z-10 flex flex-wrap gap-4 rounded-md border border-border/80 bg-card/95 px-3 py-2 text-xs shadow-sm backdrop-blur">
               <span className="flex items-center gap-1.5">
                 <span className="h-2.5 w-2.5 rounded-full bg-[#EF4444]" aria-hidden />
                 911
@@ -675,6 +745,13 @@ export default function LiveSimulationPage({
                 <span className="h-2.5 w-2.5 rounded-full bg-[#22C55E]" aria-hidden />
                 Ambulance
               </span>
+              <span className="flex items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-full border border-border bg-[#FFFFFF]" aria-hidden />
+                Crime
+              </span>
+              {crimesDate && (
+                <span className="text-muted-foreground">Day: {crimesDate} (3×)</span>
+              )}
             </div>
           </div>
         </Card>

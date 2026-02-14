@@ -2,14 +2,18 @@ import path from 'path';
 import fs from 'fs/promises';
 import { Router } from 'express';
 import { randomUUID } from 'crypto';
+import { config } from '../config.js';
 import { generateCallDialog, getNextCallerResponse } from '../services/openaiService.js';
-import { textToSpeech, sanitizeCallerResponseText } from '../services/elevenlabsService.js';
+import { textToSpeech as elevenLabsTextToSpeech, sanitizeCallerResponseText } from '../services/elevenlabsService.js';
+import { textToSpeech as openaiTextToSpeech } from '../services/openaiTtsService.js';
 import { speechToText } from '../services/whisperService.js';
 import { evaluateCall } from '../services/evaluationService.js';
 import { processCaller911, convertMp3ToWav, convertWebmToWav } from '../utils/911audio.js';
-import { config } from '../config.js';
 
 const router = Router();
+
+/** TTS function in use: OpenAI (default) or ElevenLabs when TTS_PROVIDER=elevenlabs. */
+const textToSpeech = config.ttsProvider === 'elevenlabs' ? elevenLabsTextToSpeech : openaiTextToSpeech;
 
 async function unlinkSafe(filePath) {
   try {
@@ -170,7 +174,7 @@ router.post('/generate-call-audio', async (req, res) => {
       callTimestampSeconds,
       eventsSinceLastResponse
     );
-    // 2. Convert dialog to audio (ElevenLabs); voiceOptions = string (legacy) or scenario generator payload (voice + persona settings)
+    // 2. Convert dialog to audio (OpenAI TTS by default, or ElevenLabs when TTS_PROVIDER=elevenlabs); voiceOptions = string (legacy) or scenario generator payload (voice + persona)
     const id = randomUUID();
     const filenameMp3 = `${id}.mp3`;
     const { filePath: mp3Path } = await textToSpeech(transcript, filenameMp3, voiceOptions);
@@ -187,7 +191,7 @@ router.post('/generate-call-audio', async (req, res) => {
 
     if (err.message.includes('OPENAI_API_KEY') || err.message.includes('ELEVENLABS_API_KEY')) {
       return res.status(503).json({
-        error: 'Service configuration error. Check server API keys.',
+        error: 'Service configuration error. Check server API keys (OpenAI for dialog and TTS by default; ElevenLabs if TTS_PROVIDER=elevenlabs).',
         details: err.message,
       });
     }
@@ -312,7 +316,7 @@ router.post('/interact', async (req, res) => {
     );
     const nextCallerText = sanitizeCallerResponseText(rawCallerText) || rawCallerText;
 
-    // Convert to audio (ElevenLabs), then optionally 911 phone-chain (requires ffmpeg)
+    // Convert to audio (OpenAI TTS by default, or ElevenLabs), then optionally 911 phone-chain (requires ffmpeg)
     const id = randomUUID();
     const filenameMp3 = `${id}.mp3`;
     const { filePath: mp3Path } = await textToSpeech(nextCallerText, filenameMp3, voiceOptions);
@@ -335,7 +339,7 @@ router.post('/interact', async (req, res) => {
 
     if (err.message.includes('OPENAI_API_KEY') || err.message.includes('ELEVENLABS_API_KEY')) {
       return res.status(503).json({
-        error: 'Service configuration error. Check server API keys.',
+        error: 'Service configuration error. Check server API keys (OpenAI for dialog, TTS, and Whisper; ElevenLabs only if TTS_PROVIDER=elevenlabs).',
         details: err.message,
       });
     }
