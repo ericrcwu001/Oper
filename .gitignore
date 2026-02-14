@@ -4,3 +4,4 @@ node_modules/
 next-env.d.ts
 .env
 treehacks/backend/generated-audio/
+.cursor/

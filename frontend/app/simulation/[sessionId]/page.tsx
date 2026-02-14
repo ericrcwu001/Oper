@@ -37,9 +37,14 @@ import type {
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-function buildScenarioString(scenario: Scenario): string {
-  const { description, callerProfile } = scenario
-  return `${description} Caller: ${callerProfile.name}, ${callerProfile.age} years old, ${callerProfile.emotion}.`
+function buildScenarioPayload(scenario: Scenario): {
+  scenarioDescription: string
+  callerDescription: string
+} {
+  return {
+    scenarioDescription: scenario.description,
+    callerDescription: scenario.callerDescription,
+  }
 }
 
 const scenarioIcons: Record<string, React.ElementType> = {
@@ -149,8 +154,8 @@ export default function LiveSimulationPage({
     setCallerAudioUrl(null)
     setConversationHistory([])
     try {
-      const scenarioString = buildScenarioString(scenario)
-      const data = await generateCallAudio(scenarioString)
+      const scenarioPayload = buildScenarioPayload(scenario)
+      const data = await generateCallAudio(scenarioPayload)
       setCallerAudioUrl(data.audioUrl)
       setTranscript([
         {
@@ -195,8 +200,8 @@ export default function LiveSimulationPage({
     setApiError(null)
     setApiLoading(true)
     try {
-      const scenarioString = buildScenarioString(scenario)
-      const data = await interact(scenarioString, message, conversationHistory)
+      const scenarioPayload = buildScenarioPayload(scenario)
+      const data = await interact(scenarioPayload, message, conversationHistory)
       setConversationHistory(data.conversationHistory)
       setCallerAudioUrl(data.audioUrl)
       setTranscript((prev) => [
@@ -231,8 +236,8 @@ export default function LiveSimulationPage({
     setApiError(null)
     setApiLoading(true)
     try {
-      const scenarioString = buildScenarioString(scenario)
-      const data = await interact(scenarioString, message, conversationHistory)
+      const scenarioPayload = buildScenarioPayload(scenario)
+      const data = await interact(scenarioPayload, message, conversationHistory)
       setConversationHistory(data.conversationHistory)
       setCallerAudioUrl(data.audioUrl)
       setTranscript((prev) => [
@@ -266,9 +271,9 @@ export default function LiveSimulationPage({
         r.onerror = () => reject(new Error("Failed to read recording"))
         r.readAsDataURL(blob)
       })
-      const scenarioString = buildScenarioString(scenario)
+      const scenarioPayload = buildScenarioPayload(scenario)
       const data = await interactWithVoice(
-        scenarioString,
+        scenarioPayload,
         base64,
         conversationHistory
       )

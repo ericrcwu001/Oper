@@ -6,46 +6,75 @@ import { speechToText } from '../services/whisperService.js';
 
 const router = Router();
 
-/** Filler sample scenario used when none is provided (e.g. for quick testing). Easy to swap for other scenarios later. */
+/** Filler sample scenario used when none is provided (e.g. for quick testing). */
 const SAMPLE_SCENARIO =
   'A man at a grocery store has collapsed. He is breathing but unconscious. A bystander is calling 911 and needs to explain the situation to the operator.';
 
 /**
+ * Normalize request body into scenario string (for OpenAI) and optional caller description (for TTS voice).
+ * Accepts either:
+ * - scenario: string (legacy) → fullScenario = scenario, callerDescription = undefined
+ * - scenario: { scenarioDescription, callerDescription } (object) → fullScenario = combined, callerDescription passed to TTS
+ */
+function parseScenarioBody(body) {
+  if (body === undefined || body === null) {
+    return { fullScenario: SAMPLE_SCENARIO, callerDescription: undefined };
+  }
+  const raw = body.scenario;
+  if (raw === undefined || raw === null) {
+    return { fullScenario: SAMPLE_SCENARIO, callerDescription: undefined };
+  }
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim() || SAMPLE_SCENARIO;
+    return { fullScenario: trimmed, callerDescription: undefined };
+  }
+  // Accept object: { scenarioDescription, callerDescription }
+  if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+    const scenarioDescription =
+      typeof raw.scenarioDescription === 'string' ? raw.scenarioDescription.trim() : '';
+    const callerDescription =
+      typeof raw.callerDescription === 'string' ? raw.callerDescription.trim() : undefined;
+    const fullScenario = scenarioDescription
+      ? (callerDescription ? `${scenarioDescription} Caller: ${callerDescription}.` : scenarioDescription)
+      : SAMPLE_SCENARIO;
+    return { fullScenario, callerDescription: callerDescription || undefined };
+  }
+  return null;
+}
+
+/**
  * POST /generate-call-audio
  *
- * Body: { "scenario": "string" }
- * - scenario: Description of the emergency (e.g. "Jack has fallen and broken his arm, explain the situation to the operator.")
- *   Omit or leave empty to use the built-in sample scenario.
+ * Body: { "scenario": string | { scenarioDescription: string, callerDescription: string } }
+ * - scenario (string): Legacy; full description of the emergency and caller.
+ * - scenario (object): scenarioDescription = emergency situation; callerDescription = caller identity (used for TTS voice).
  *
  * Returns: { "audioUrl": "https://...", "transcript": "Generated dialog text" }
  */
 router.post('/generate-call-audio', async (req, res) => {
   try {
-    let { scenario } = req.body;
-
-    if (scenario === undefined || scenario === null) {
-      scenario = SAMPLE_SCENARIO;
-    }
-    if (typeof scenario !== 'string') {
+    const parsed = parseScenarioBody(req.body);
+    if (!parsed) {
       return res.status(400).json({
-        error: 'Invalid "scenario": must be a string. Expected JSON: { "scenario": "string" }',
+        error:
+          'Invalid "scenario": must be a string or object { scenarioDescription, callerDescription }.',
       });
     }
 
-    const trimmedScenario = scenario.trim() || SAMPLE_SCENARIO;
-    if (!trimmedScenario) {
+    const { fullScenario, callerDescription } = parsed;
+    if (!fullScenario) {
       return res.status(400).json({
         error: 'Scenario cannot be empty.',
       });
     }
 
     // 1. Generate dialog from scenario (OpenAI)
-    const transcript = await generateCallDialog(trimmedScenario);
+    const transcript = await generateCallDialog(fullScenario);
 
-    // 2. Convert dialog to audio (ElevenLabs) and save file
+    // 2. Convert dialog to audio (ElevenLabs), using caller description for voice selection
     const id = randomUUID();
     const filename = `${id}.mp3`;
-    const { audioUrl } = await textToSpeech(transcript, filename);
+    const { audioUrl } = await textToSpeech(transcript, filename, callerDescription);
 
     return res.status(200).json({
       audioUrl,
@@ -102,7 +131,7 @@ function parseConversationHistory(raw) {
  * Supports multiple back-and-forth turns by sending conversationHistory each time.
  *
  * Body:
- * - scenario (required): Original emergency scenario (placeholder for dynamic scenario input later).
+ * - scenario (required): string or { scenarioDescription, callerDescription }. Caller description used for TTS voice.
  * - userInput (optional): Operator message as text.
  * - userInputAudio (optional): Operator message as base64 audio; if present, transcribed with Whisper and used as operator message.
  * - conversationHistory (optional): Array of { role: "caller"|"operator", content: string } for prior turns.
@@ -113,14 +142,14 @@ router.post('/interact', async (req, res) => {
   try {
     const { scenario: rawScenario, userInput, userInputAudio, conversationHistory: rawHistory } = req.body;
 
-    // Scenario: required; support placeholder / dynamic scenario input later
-    let scenario =
-      typeof rawScenario === 'string' ? rawScenario.trim() : '';
-    if (!scenario) {
+    const parsed = parseScenarioBody({ scenario: rawScenario });
+    if (!parsed || !parsed.fullScenario) {
       return res.status(400).json({
-        error: 'Missing or empty "scenario". Required for context. Use dynamic scenario when integrated.',
+        error: 'Missing or empty "scenario". Required for context. Send string or { scenarioDescription, callerDescription }.',
       });
     }
+
+    const { fullScenario: scenario, callerDescription } = parsed;
 
     // Operator message: either from text or from speech (Whisper)
     let operatorMessage = typeof userInput === 'string' ? userInput.trim() : '';
@@ -157,10 +186,10 @@ router.post('/interact', async (req, res) => {
       operatorMessage
     );
 
-    // Convert to audio (ElevenLabs)
+    // Convert to audio (ElevenLabs), using caller description for voice selection
     const id = randomUUID();
     const filename = `${id}.mp3`;
-    const { audioUrl } = await textToSpeech(nextCallerText, filename);
+    const { audioUrl } = await textToSpeech(nextCallerText, filename, callerDescription);
 
     // Build updated history for next request (client should send this back)
     const updatedHistory = [

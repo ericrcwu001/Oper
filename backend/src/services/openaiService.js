@@ -19,8 +19,16 @@ export async function generateCallDialog(scenario) {
 
   const systemPrompt = `You are writing a short script for a 911 emergency call. 
 The caller is a civilian reporting an emergency. Generate ONLY the caller's opening statement 
-as they would say it when the operator answers – realistic, concise, and appropriate for the situation. 
-Do not include operator lines or stage directions. Output plain text only, one paragraph.`;
+as they would say it when the operator answers – realistic, concise, and appropriate for the situation.
+
+Make the speech sound natural and human under stress. Include:
+- Brief pauses (use "..." or "—" where someone would hesitate or gasp)
+- Occasional stutters or false starts (e.g. "I-I", "th-the", "h-he's not...")
+- Fillers when fitting (e.g. "um", "uh", "oh god")
+- Short repetitions or self-corrections (e.g. "He's not— he's not breathing")
+- Slightly broken or run-on phrasing as in real panic, but keep it readable
+
+Do not overdo it; one or two disfluencies per sentence is enough. Do not include operator lines or stage directions. Output plain text only, one paragraph.`;
 
   const userPrompt = `Scenario: ${scenario}\n\nGenerate the caller's opening statement.`;
 
@@ -67,8 +75,15 @@ export async function getNextCallerResponse(scenario, conversationHistory, opera
 
   const systemPrompt = `You are playing the role of a 911 caller in a training simulation. 
 The following describes the emergency situation. Stay in character and respond as the caller would: 
-realistic, emotional when appropriate, and concise. Do not include operator lines or stage directions. 
-Output only the caller's reply as plain text.
+realistic, emotional when appropriate, and concise.
+
+Make each reply sound like natural speech under stress. Include when it fits:
+- Brief pauses ("...", "—") where the caller would hesitate or get choked up
+- Occasional stutters or false starts ("I-I don't know", "th-there's", "h-he")
+- Fillers ("um", "uh", "oh god") and short repetitions or self-corrections
+- Slightly broken phrasing, but keep the reply clear and readable
+
+Do not overdo disfluencies; one or two per reply is enough. Do not include operator lines or stage directions. Output only the caller's reply as plain text.
 
 Scenario: ${scenario}`;
 

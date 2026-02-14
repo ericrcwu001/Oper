@@ -7,6 +7,7 @@ export const scenarios: Scenario[] = [
     title: "Cardiac Arrest",
     description:
       "A 58-year-old male collapsed at a grocery store. Bystander is panicked and calling from the scene. Patient is unresponsive, not breathing normally.",
+    callerDescription: "Panicked 34-year-old woman, Maria Johnson, bystander at the scene.",
     callerProfile: { name: "Maria Johnson", age: 34, emotion: "panicked" },
     criticalInfo: [
       "Patient location (Grocery store on 5th Ave)",
@@ -36,6 +37,7 @@ export const scenarios: Scenario[] = [
     title: "Structure Fire",
     description:
       "Apartment building fire on the 3rd floor. Caller is a resident on the 2nd floor, smells smoke and sees flames from the window across the courtyard.",
+    callerDescription: "Urgent 45-year-old man, David Chen, resident on the 2nd floor.",
     callerProfile: { name: "David Chen", age: 45, emotion: "urgent" },
     criticalInfo: [
       "Building address",
@@ -65,6 +67,7 @@ export const scenarios: Scenario[] = [
     title: "Traffic Accident",
     description:
       "Two-car collision at an intersection. One driver appears injured with a bleeding head wound. Other driver is walking around dazed.",
+    callerDescription: "Shaken 28-year-old woman, Sarah Williams, witness at the scene.",
     callerProfile: { name: "Sarah Williams", age: 28, emotion: "shaken" },
     criticalInfo: [
       "Intersection location",
