@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef, use } from "react"
+import { useState, useEffect, useRef, use } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { AppShell } from "@/components/app-shell"
 import { TranscriptFeed } from "@/components/transcript-feed"
@@ -27,9 +27,20 @@ import {
   Loader2,
   AlertCircle,
 } from "lucide-react"
-import { scenarios, callerScripts } from "@/lib/mock-data"
-import type { TranscriptTurn, ConnectionStatus, ScenarioType } from "@/lib/types"
+import { scenarios } from "@/lib/mock-data"
+import { generateCallAudio, interact, interactWithVoice } from "@/lib/api"
+import type {
+  TranscriptTurn,
+  ConnectionStatus,
+  ScenarioType,
+  Scenario,
+} from "@/lib/types"
 import { cn } from "@/lib/utils"
+
+function buildScenarioString(scenario: Scenario): string {
+  const { description, callerProfile } = scenario
+  return `${description} Caller: ${callerProfile.name}, ${callerProfile.age} years old, ${callerProfile.emotion}.`
+}
 
 const scenarioIcons: Record<string, React.ElementType> = {
   "cardiac-arrest": Heart,
@@ -56,7 +67,6 @@ export default function LiveSimulationPage({
 
   const scenario = scenarios.find((s) => s.id === scenarioId) || scenarios[0]
   const ScenarioIcon = scenarioIcons[scenario.scenarioType] || Heart
-  const script = callerScripts[scenario.scenarioType] || callerScripts["cardiac-arrest"]
 
   const [callActive, setCallActive] = useState(false)
   const [callSeconds, setCallSeconds] = useState(0)
@@ -68,9 +78,13 @@ export default function LiveSimulationPage({
   const [textInput, setTextInput] = useState("")
   const [wsError, setWsError] = useState(false)
   const [currentHint, setCurrentHint] = useState("")
+  const [callerAudioUrl, setCallerAudioUrl] = useState<string | null>(null)
+  const [conversationHistory, setConversationHistory] = useState<
+    { role: "caller" | "operator"; content: string }[]
+  >([])
+  const [apiLoading, setApiLoading] = useState(false)
+  const [apiError, setApiError] = useState<string | null>(null)
 
-  const scriptIndexRef = useRef(0)
-  const streamIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Simulated loading
@@ -102,40 +116,6 @@ export default function LiveSimulationPage({
     setLatency(0)
   }, [callActive])
 
-  const streamNextCallerLine = useCallback(() => {
-    if (scriptIndexRef.current >= script.length) return
-
-    const fullText = script[scriptIndexRef.current]
-    const words = fullText.split(" ")
-    let wordIdx = 0
-
-    // Show partial text word by word
-    const partialInterval = setInterval(() => {
-      if (wordIdx < words.length) {
-        setPartialText(words.slice(0, wordIdx + 1).join(" "))
-        wordIdx++
-      } else {
-        clearInterval(partialInterval)
-        setPartialText("")
-        // Add final turn
-        setTranscript((prev) => [
-          ...prev,
-          {
-            id: `t-${Date.now()}`,
-            timestamp: Math.floor(
-              (Date.now() - (streamIntervalRef.current ? Date.now() : Date.now())) / 1000
-            ) || prev.length * 5,
-            speaker: "caller",
-            text: fullText,
-          },
-        ])
-        scriptIndexRef.current++
-      }
-    }, 180)
-
-    return () => clearInterval(partialInterval)
-  }, [script])
-
   // Hint system
   useEffect(() => {
     if (!callActive || !hintsEnabled) {
@@ -161,61 +141,164 @@ export default function LiveSimulationPage({
     }
   }, [callActive, hintsEnabled, scenario.expectedActions])
 
-  const handleStartCall = () => {
+  const handleStartCall = async () => {
     setConnectionStatus("connecting")
     setWsError(false)
-    setTimeout(() => {
-      setConnectionStatus("connected")
+    setApiError(null)
+    setTranscript([])
+    setCallerAudioUrl(null)
+    setConversationHistory([])
+    try {
+      const scenarioString = buildScenarioString(scenario)
+      const data = await generateCallAudio(scenarioString)
+      setCallerAudioUrl(data.audioUrl)
+      setTranscript([
+        {
+          id: `t-${Date.now()}`,
+          timestamp: 0,
+          speaker: "caller",
+          text: data.transcript,
+        },
+      ])
+      setConversationHistory([{ role: "caller", content: data.transcript }])
       setCallActive(true)
+      setConnectionStatus("connected")
       setCallSeconds(0)
-      scriptIndexRef.current = 0
-      setTranscript([])
-
-      // Start streaming caller lines every 8 seconds
-      streamNextCallerLine()
-      streamIntervalRef.current = setInterval(() => {
-        streamNextCallerLine()
-      }, 8000)
-    }, 1500)
+    } catch (e) {
+      setApiError(e instanceof Error ? e.message : "Failed to start call")
+      setConnectionStatus("disconnected")
+    }
   }
 
   const handleEndCall = () => {
     setCallActive(false)
     setConnectionStatus("disconnected")
     setPartialText("")
-    if (streamIntervalRef.current) clearInterval(streamIntervalRef.current)
-    // Navigate to review
+    setCallerAudioUrl(null)
+    setConversationHistory([])
     router.push(`/simulation/${sessionId}/review?scenario=${scenarioId}`)
   }
 
-  const handleSendText = () => {
-    if (!textInput.trim() || !callActive) return
+  const handleSendText = async () => {
+    const message = textInput.trim()
+    if (!message || !callActive) return
     setTranscript((prev) => [
       ...prev,
       {
         id: `t-op-${Date.now()}`,
         timestamp: callSeconds,
         speaker: "operator",
-        text: textInput.trim(),
+        text: message,
       },
     ])
     setTextInput("")
-    // Trigger next caller line after operator speaks
-    setTimeout(() => streamNextCallerLine(), 2000)
+    setApiError(null)
+    setApiLoading(true)
+    try {
+      const scenarioString = buildScenarioString(scenario)
+      const data = await interact(scenarioString, message, conversationHistory)
+      setConversationHistory(data.conversationHistory)
+      setCallerAudioUrl(data.audioUrl)
+      setTranscript((prev) => [
+        ...prev,
+        {
+          id: `t-${Date.now()}`,
+          timestamp: callSeconds,
+          speaker: "caller",
+          text: data.transcript,
+        },
+      ])
+    } catch (e) {
+      setApiError(e instanceof Error ? e.message : "Failed to get caller response")
+    } finally {
+      setApiLoading(false)
+    }
   }
 
-  const handleRequestClarification = () => {
+  const handleRequestClarification = async () => {
     if (!callActive) return
+    const message =
+      "Can you please repeat that? I need to make sure I have the correct information."
     setTranscript((prev) => [
       ...prev,
       {
         id: `t-op-clar-${Date.now()}`,
         timestamp: callSeconds,
         speaker: "operator",
-        text: "Can you please repeat that? I need to make sure I have the correct information.",
+        text: message,
       },
     ])
-    setTimeout(() => streamNextCallerLine(), 2500)
+    setApiError(null)
+    setApiLoading(true)
+    try {
+      const scenarioString = buildScenarioString(scenario)
+      const data = await interact(scenarioString, message, conversationHistory)
+      setConversationHistory(data.conversationHistory)
+      setCallerAudioUrl(data.audioUrl)
+      setTranscript((prev) => [
+        ...prev,
+        {
+          id: `t-${Date.now()}`,
+          timestamp: callSeconds,
+          speaker: "caller",
+          text: data.transcript,
+        },
+      ])
+    } catch (e) {
+      setApiError(e instanceof Error ? e.message : "Failed to get caller response")
+    } finally {
+      setApiLoading(false)
+    }
+  }
+
+  const handleVoiceRecordingComplete = async (blob: Blob) => {
+    if (!callActive) return
+    setApiError(null)
+    setApiLoading(true)
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader()
+        r.onload = () => {
+          const dataUrl = r.result as string
+          const base64 = dataUrl.includes(",") ? dataUrl.split(",")[1] ?? "" : ""
+          resolve(base64)
+        }
+        r.onerror = () => reject(new Error("Failed to read recording"))
+        r.readAsDataURL(blob)
+      })
+      const scenarioString = buildScenarioString(scenario)
+      const data = await interactWithVoice(
+        scenarioString,
+        base64,
+        conversationHistory
+      )
+      setConversationHistory(data.conversationHistory)
+      setCallerAudioUrl(data.audioUrl)
+      const operatorTurn = data.conversationHistory[data.conversationHistory.length - 2]
+      const operatorText =
+        operatorTurn?.role === "operator" ? operatorTurn.content : "[Voice]"
+      setTranscript((prev) => [
+        ...prev,
+        {
+          id: `t-op-${Date.now()}`,
+          timestamp: callSeconds,
+          speaker: "operator",
+          text: operatorText,
+        },
+        {
+          id: `t-${Date.now()}`,
+          timestamp: callSeconds,
+          speaker: "caller",
+          text: data.transcript,
+        },
+      ])
+    } catch (e) {
+      setApiError(
+        e instanceof Error ? e.message : "Failed to send voice message"
+      )
+    } finally {
+      setApiLoading(false)
+    }
   }
 
   if (loading) {
@@ -287,21 +370,24 @@ export default function LiveSimulationPage({
           </div>
         </div>
 
-        {/* WS Error */}
-        {wsError && (
+        {/* API / connection errors */}
+        {(wsError || apiError) && (
           <div className="mb-4 flex items-center gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
             <AlertCircle className="h-4 w-4 shrink-0" />
-            <span>WebSocket disconnected.</span>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                setWsError(false)
-                handleStartCall()
-              }}
-            >
-              Retry
-            </Button>
+            <span>{apiError ?? "WebSocket disconnected."}</span>
+            {!callActive && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setWsError(false)
+                  setApiError(null)
+                  handleStartCall()
+                }}
+              >
+                Retry
+              </Button>
+            )}
           </div>
         )}
 
@@ -389,14 +475,21 @@ export default function LiveSimulationPage({
                 <p className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Caller Audio
                 </p>
-                <AudioControl disabled={!callActive} />
+                <AudioControl
+                  audioUrl={callerAudioUrl}
+                  disabled={!callActive}
+                />
               </div>
 
               <div className="border-t pt-4">
                 <p className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Microphone
                 </p>
-                <MicControl disabled={!callActive} />
+                <MicControl
+                  disabled={!callActive}
+                  onRecordingComplete={handleVoiceRecordingComplete}
+                  sending={apiLoading}
+                />
               </div>
             </CardContent>
           </Card>
@@ -425,16 +518,20 @@ export default function LiveSimulationPage({
                 <Button
                   size="icon"
                   onClick={handleSendText}
-                  disabled={!callActive || !textInput.trim()}
+                  disabled={!callActive || !textInput.trim() || apiLoading}
                   aria-label="Send message"
                 >
-                  <Send className="h-4 w-4" />
+                  {apiLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={handleRequestClarification}
-                  disabled={!callActive}
+                  disabled={!callActive || apiLoading}
                   className="shrink-0 gap-1 text-xs"
                 >
                   <HelpCircle className="h-3.5 w-3.5" />
