@@ -100,9 +100,20 @@ export default function ReviewPage({
   const scenario = scenarios.find((s) => s.id === scenarioId) || scenarios[0]
 
   const [evaluation] = useState<Evaluation>(generateEvaluation)
-  const [reviewTranscript] = useState<TranscriptTurn[]>(() =>
-    generateReviewTranscript(scenario.scenarioType)
-  )
+  const [reviewTranscript] = useState<TranscriptTurn[]>(() => {
+    try {
+      if (typeof window !== "undefined") {
+        const raw = sessionStorage.getItem(`simulation-transcript-${sessionId}`)
+        if (raw) {
+          const parsed = JSON.parse(raw) as TranscriptTurn[]
+          if (Array.isArray(parsed)) return parsed
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return generateReviewTranscript(scenario.scenarioType)
+  })
   const [summary, setSummary] = useState("")
   const [submitted, setSubmitted] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
