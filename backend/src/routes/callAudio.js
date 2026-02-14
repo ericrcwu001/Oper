@@ -1,60 +1,170 @@
+import path from 'path';
+import fs from 'fs/promises';
 import { Router } from 'express';
 import { randomUUID } from 'crypto';
 import { generateCallDialog, getNextCallerResponse } from '../services/openaiService.js';
 import { textToSpeech } from '../services/elevenlabsService.js';
 import { speechToText } from '../services/whisperService.js';
 import { evaluateCall } from '../services/evaluationService.js';
-import { buildVoiceAgentSystemPrompt } from '../services/scenarioGenerator.js';
+import { processCaller911, convertMp3ToWav } from '../utils/911audio.js';
+import { config } from '../config.js';
 
 const router = Router();
 
-/** Filler sample scenario used when none is provided (e.g. for quick testing). Easy to swap for other scenarios later. */
+async function unlinkSafe(filePath) {
+  try {
+    await fs.unlink(filePath);
+  } catch {
+    // ignore
+  }
+}
+
+/** Filler sample scenario used when none is provided (e.g. for quick testing). */
 const SAMPLE_SCENARIO =
   'A man at a grocery store has collapsed. He is breathing but unconscious. A bystander is calling 911 and needs to explain the situation to the operator.';
 
 /**
- * Resolve scenario string from body: either scenarioPayload (from scenario generator) or scenario string.
- * @param {object} body - Request body with optional scenarioPayload or scenario.
- * @returns {string} Scenario string for OpenAI (full voice-agent prompt when payload provided).
+ * Detect if the object is in scenarioGenerator.js format (has scenario + persona).
+ * @param {object} raw
  */
-function resolveScenarioString(body) {
-  const { scenarioPayload, scenario: rawScenario } = body;
-  if (scenarioPayload && typeof scenarioPayload === 'object' && scenarioPayload.scenario) {
-    const built = buildVoiceAgentSystemPrompt(scenarioPayload);
-    if (built && built.trim()) return built.trim();
+function isScenarioGeneratorPayload(raw) {
+  return (
+    raw &&
+    typeof raw === 'object' &&
+    !Array.isArray(raw) &&
+    raw.scenario &&
+    typeof raw.scenario === 'object' &&
+    raw.persona &&
+    typeof raw.persona === 'object'
+  );
+}
+
+/**
+ * Build a single scenario string for OpenAI from a scenario generator payload.
+ */
+function fullScenarioFromGeneratorPayload(payload) {
+  const summary = payload.scenario_summary_for_agent || payload.scenario?.description || '';
+  const profile = payload.scenario?.caller_profile || {};
+  const parts = [summary];
+  const name = profile.name || '';
+  const age = profile.age != null ? profile.age : '';
+  const emotion = profile.emotion || '';
+  const gender = profile.gender || '';
+  if (name || age || emotion || gender) {
+    parts.push(
+      `Caller: ${[name, age, emotion, gender].filter(Boolean).join(', ')}.`
+    );
   }
-  if (rawScenario !== undefined && rawScenario !== null && typeof rawScenario === 'string') {
-    const trimmed = rawScenario.trim();
-    if (trimmed) return trimmed;
+  return parts.filter(Boolean).join(' ');
+}
+
+/**
+ * Run 911 phone-chain on TTS MP3. On success returns { audioUrl } for the .wav.
+ * If ffmpeg is missing (ENOENT) or processing fails, returns { audioUrl } for the original .mp3.
+ */
+async function apply911PipelineOrFallback(id, mp3Path) {
+  const dir = path.dirname(mp3Path);
+  const preWavPath = path.join(dir, `${id}_pre.wav`);
+  const outWavPath = path.join(dir, `${id}.wav`);
+  try {
+    await convertMp3ToWav(mp3Path, preWavPath);
+    await processCaller911({ inWavPath: preWavPath, outWavPath, addNoise: true });
+    // Keep only the final .wav; remove intermediate pre-wav and source mp3
+    await unlinkSafe(preWavPath);
+    await unlinkSafe(mp3Path);
+    return {
+      audioUrl: `${config.baseUrl.replace(/\/$/, '')}/${config.generatedAudioDir}/${id}.wav`,
+    };
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.message?.includes('spawn ffmpeg')) {
+      console.warn('ffmpeg not found or failed; serving original TTS audio. Install ffmpeg for 911 phone effect.');
+    } else {
+      console.warn('911 audio processing failed:', err.message);
+    }
+    return {
+      audioUrl: `${config.baseUrl.replace(/\/$/, '')}/${config.generatedAudioDir}/${id}.mp3`,
+    };
   }
-  return SAMPLE_SCENARIO;
+}
+
+/**
+ * Normalize request body into scenario string (for OpenAI) and voice options for TTS.
+ * Reads from body.scenarioPayload (generator payload) or body.scenario (string or object).
+ */
+function parseScenarioBody(body) {
+  const raw = body?.scenarioPayload ?? body?.scenario;
+  if (body === undefined || body === null) {
+    return { fullScenario: SAMPLE_SCENARIO, voiceOptions: undefined };
+  }
+  if (raw === undefined || raw === null) {
+    return { fullScenario: SAMPLE_SCENARIO, voiceOptions: undefined };
+  }
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim() || SAMPLE_SCENARIO;
+    return { fullScenario: trimmed, voiceOptions: undefined };
+  }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return null;
+  }
+  if (isScenarioGeneratorPayload(raw)) {
+    const fullScenario = fullScenarioFromGeneratorPayload(raw);
+    return { fullScenario: fullScenario || SAMPLE_SCENARIO, voiceOptions: raw };
+  }
+  const scenarioDescription =
+    typeof raw.scenarioDescription === 'string' ? raw.scenarioDescription.trim() : '';
+  const callerDescription =
+    typeof raw.callerDescription === 'string' ? raw.callerDescription.trim() : undefined;
+  const difficulty =
+    typeof raw.difficulty === 'string' && ['easy', 'medium', 'hard'].includes(raw.difficulty.toLowerCase())
+      ? raw.difficulty.toLowerCase()
+      : undefined;
+  const fullScenario = scenarioDescription
+    ? (callerDescription ? `${scenarioDescription} Caller: ${callerDescription}.` : scenarioDescription)
+    : SAMPLE_SCENARIO;
+  const voiceOptions =
+    scenarioDescription || callerDescription || difficulty
+      ? { scenarioDescription, callerDescription, difficulty }
+      : undefined;
+  return { fullScenario, voiceOptions };
 }
 
 /**
  * POST /generate-call-audio
  *
- * Body: { "scenario": "string" } OR { "scenarioPayload": object }
- * - scenario: Description of the emergency (legacy). Omit if using scenarioPayload.
- * - scenarioPayload: Full payload from POST /api/scenarios/generate; used to build voice-agent context.
+ * Body: { "scenario": string | object } OR { "scenarioPayload": object }
+ * - scenario (string): Legacy; full description of the emergency and caller.
+ * - scenario (object): { scenarioDescription, callerDescription } or full scenarioGenerator payload for TTS voice + persona.
+ * - scenarioPayload: Full payload from POST /api/scenarios/generate (alternative to scenario).
  *
  * Returns: { "audioUrl": "https://...", "transcript": "Generated dialog text" }
  */
 router.post('/generate-call-audio', async (req, res) => {
   try {
-    const scenarioString = resolveScenarioString(req.body);
-    if (!scenarioString) {
+    const parsed = parseScenarioBody(req.body);
+    if (!parsed) {
       return res.status(400).json({
-        error: 'Scenario cannot be empty. Provide "scenario" (string) or "scenarioPayload" (object).',
+        error:
+          'Invalid "scenario": must be a string or object { scenarioDescription, callerDescription }.',
       });
     }
 
-    // 1. Generate dialog from scenario (OpenAI)
-    const transcript = await generateCallDialog(scenarioString);
+    const { fullScenario, voiceOptions } = parsed;
+    if (!fullScenario) {
+      return res.status(400).json({
+        error: 'Scenario cannot be empty.',
+      });
+    }
 
-    // 2. Convert dialog to audio (ElevenLabs) and save file
+    // 1. Generate dialog from scenario (OpenAI); pass persona payload when available for persona-based dialogue
+    const transcript = await generateCallDialog(fullScenario, voiceOptions);
+
+    // 2. Convert dialog to audio (ElevenLabs); voiceOptions = string (legacy) or scenario generator payload (voice + persona settings)
     const id = randomUUID();
-    const filename = `${id}.mp3`;
-    const { audioUrl } = await textToSpeech(transcript, filename);
+    const filenameMp3 = `${id}.mp3`;
+    const { filePath: mp3Path } = await textToSpeech(transcript, filenameMp3, voiceOptions);
+
+    // 3. Optionally run 911 phone-chain (requires ffmpeg); fallback to original MP3
+    const { audioUrl } = await apply911PipelineOrFallback(id, mp3Path);
 
     return res.status(200).json({
       audioUrl,
@@ -111,7 +221,7 @@ function parseConversationHistory(raw) {
  * Supports multiple back-and-forth turns by sending conversationHistory each time.
  *
  * Body:
- * - scenario (required): Original emergency scenario (placeholder for dynamic scenario input later).
+ * - scenario (required): string or { scenarioDescription, callerDescription }. Caller description used for TTS voice.
  * - userInput (optional): Operator message as text.
  * - userInputAudio (optional): Operator message as base64 audio; if present, transcribed with Whisper and used as operator message.
  * - conversationHistory (optional): Array of { role: "caller"|"operator", content: string } for prior turns.
@@ -122,13 +232,14 @@ router.post('/interact', async (req, res) => {
   try {
     const { userInput, userInputAudio, conversationHistory: rawHistory } = req.body;
 
-    // Scenario: from scenarioPayload (generator) or scenario string
-    const scenario = resolveScenarioString(req.body);
-    if (!scenario) {
+    const parsed = parseScenarioBody(req.body);
+    if (!parsed || !parsed.fullScenario) {
       return res.status(400).json({
-        error: 'Missing scenario context. Provide "scenario" (string) or "scenarioPayload" (object).',
+        error: 'Missing or empty "scenario". Required for context. Send "scenario" or "scenarioPayload".',
       });
     }
+
+    const { fullScenario: scenario, voiceOptions } = parsed;
 
     // Operator message: either from text or from speech (Whisper)
     let operatorMessage = typeof userInput === 'string' ? userInput.trim() : '';
@@ -158,17 +269,19 @@ router.post('/interact', async (req, res) => {
 
     const conversationHistory = parseConversationHistory(rawHistory);
 
-    // Generate next caller response (GPT-4) with full context
+    // Generate next caller response (GPT-4) with full context and optional persona
     const nextCallerText = await getNextCallerResponse(
       scenario,
       conversationHistory,
-      operatorMessage
+      operatorMessage,
+      voiceOptions
     );
 
-    // Convert to audio (ElevenLabs)
+    // Convert to audio (ElevenLabs), then optionally 911 phone-chain (requires ffmpeg)
     const id = randomUUID();
-    const filename = `${id}.mp3`;
-    const { audioUrl } = await textToSpeech(nextCallerText, filename);
+    const filenameMp3 = `${id}.mp3`;
+    const { filePath: mp3Path } = await textToSpeech(nextCallerText, filenameMp3, voiceOptions);
+    const { audioUrl } = await apply911PipelineOrFallback(id, mp3Path);
 
     // Build updated history for next request (client should send this back)
     const updatedHistory = [

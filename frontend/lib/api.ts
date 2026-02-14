@@ -17,7 +17,9 @@ export interface InteractResponse {
   conversationHistory: { role: "caller" | "operator"; content: string }[]
 }
 
-/** Payload returned by POST /api/scenarios/generate (scenario generator). */
+import type { ScenarioPayload } from "@/lib/types"
+
+/** Full scenario payload from POST /api/scenarios/generate (backend scenarioGenerator). */
 export interface GeneratedScenarioPayload {
   scenario: {
     id: string
@@ -34,11 +36,17 @@ export interface GeneratedScenarioPayload {
     }
     critical_info: string[]
     expected_actions: string[]
-    optional_complications: string[]
-    difficulty: string
+    optional_complications?: string[]
+    difficulty: "easy" | "medium" | "hard"
     language: string
   }
-  persona?: { stability?: number; style?: number; speed?: number; voice_description?: string }
+  persona?: {
+    stability?: number
+    style?: number
+    speed?: number
+    voice_description?: string
+  }
+  caller_script?: string[]
   role_instruction?: string
   scenario_summary_for_agent?: string
   critical_info?: string[]
@@ -50,9 +58,14 @@ export interface GeneratedScenarioPayload {
   do_not_say?: string[]
 }
 
+/** Scenario sent to generate-call-audio / interact: string (legacy), simple payload, or full generator payload. */
+export type CallScenarioInput =
+  | string
+  | ScenarioPayload
+  | GeneratedScenarioPayload
+
 /**
- * Generate a unique scenario for the given difficulty (POST /api/scenarios/generate).
- * Use the returned payload for the call simulation and pass it as scenarioPayload to generateCallAudio/interact.
+ * Generate a new scenario from the backend (POST /api/scenarios/generate).
  */
 export async function generateScenario(
   difficulty: "easy" | "medium" | "hard"
@@ -73,19 +86,15 @@ export async function generateScenario(
 
 /**
  * Generate initial caller audio (POST /generate-call-audio).
- * Pass either scenarioPayload (from generateScenario) or a scenario string.
+ * Accepts simple ScenarioPayload or full GeneratedScenarioPayload for voice + persona settings.
  */
 export async function generateCallAudio(
-  scenarioOrPayload: string | GeneratedScenarioPayload
+  scenario: CallScenarioInput
 ): Promise<GenerateCallAudioResponse> {
-  const body =
-    typeof scenarioOrPayload === "string"
-      ? { scenario: scenarioOrPayload }
-      : { scenarioPayload: scenarioOrPayload }
   const res = await fetch(`${API_BASE}/generate-call-audio`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ scenario }),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))
@@ -98,22 +107,18 @@ export async function generateCallAudio(
 
 /**
  * Send operator message (text) and get next caller audio (POST /interact).
- * Pass either scenarioPayload (from generateScenario) or a scenario string.
+ * Accepts simple ScenarioPayload or full GeneratedScenarioPayload.
  */
 export async function interact(
-  scenarioOrPayload: string | GeneratedScenarioPayload,
+  scenario: CallScenarioInput,
   userInput: string,
   conversationHistory: { role: "caller" | "operator"; content: string }[]
 ): Promise<InteractResponse> {
-  const body =
-    typeof scenarioOrPayload === "string"
-      ? { scenario: scenarioOrPayload }
-      : { scenarioPayload: scenarioOrPayload }
   const res = await fetch(`${API_BASE}/interact`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      ...body,
+      scenario,
       userInput,
       conversationHistory,
     }),
@@ -129,22 +134,19 @@ export async function interact(
 
 /**
  * Send operator voice (base64 audio) and get next caller audio (POST /interact).
- * Pass either scenarioPayload (from generateScenario) or a scenario string.
+ * Backend uses Whisper to transcribe, then GPT + ElevenLabs for the reply.
+ * Accepts simple ScenarioPayload or full GeneratedScenarioPayload.
  */
 export async function interactWithVoice(
-  scenarioOrPayload: string | GeneratedScenarioPayload,
+  scenario: CallScenarioInput,
   userInputAudioBase64: string,
   conversationHistory: { role: "caller" | "operator"; content: string }[]
 ): Promise<InteractResponse> {
-  const body =
-    typeof scenarioOrPayload === "string"
-      ? { scenario: scenarioOrPayload }
-      : { scenarioPayload: scenarioOrPayload }
   const res = await fetch(`${API_BASE}/interact`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      ...body,
+      scenario,
       userInputAudio: userInputAudioBase64,
       conversationHistory,
     }),

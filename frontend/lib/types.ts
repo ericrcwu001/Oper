@@ -8,7 +8,10 @@ export interface Scenario {
   id: string
   scenarioType: ScenarioType
   title: string
+  /** Description of the emergency situation (location, what happened, etc.). */
   description: string
+  /** Human-readable description of the caller (used for TTS voice matching and AI context). */
+  callerDescription: string
   callerProfile: {
     name: string
     age: number
@@ -19,6 +22,14 @@ export interface Scenario {
   optionalComplications: string[]
   difficulty: Difficulty
   language: Language
+}
+
+/** Payload sent to backend for generate-call-audio and interact (scenario + caller + optional difficulty). */
+export interface ScenarioPayload {
+  scenarioDescription: string
+  callerDescription: string
+  /** Selected difficulty (easy/medium/hard); sent so backend can tailor dialogue. */
+  difficulty?: Difficulty
 }
 
 export interface TranscriptTurn {
