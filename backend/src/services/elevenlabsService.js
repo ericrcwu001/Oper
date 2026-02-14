@@ -6,15 +6,15 @@ import { config } from '../config.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
- * Strip leading speaker labels so TTS does not read them aloud (e.g. "[Caller]:", "Caller:").
+ * Strip all leading speaker labels so TTS does not read them aloud.
+ * Handles multiple occurrences (e.g. "[Caller] [Caller] Hello" -> "Hello").
  * @param {string} text
  * @returns {string}
  */
 function sanitizeForTts(text) {
   if (typeof text !== 'string') return '';
   return text
-    .replace(/^\s*\[?(?:Caller|Operator)\]?\s*:\s*/i, '')
-    .replace(/^\s*\[(?:Caller|Operator)\]\s*/i, '')
+    .replace(/^\s*(\[?(?:Caller|Operator)\]?\s*:?\s*)+/i, '')
     .trim();
 }
 

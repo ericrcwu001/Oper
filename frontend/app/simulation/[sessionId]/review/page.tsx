@@ -381,10 +381,27 @@ export default function ReviewPage({
                   const turnIndex = reviewTranscript.findIndex(
                     (t) => t.id === turn.id
                   )
-                  const highlights: TranscriptHighlight[] =
+                  const isOperatorTurn = turn.speaker === "operator"
+                  let highlights: TranscriptHighlight[] =
                     evaluation?.transcriptHighlights?.filter(
                       (h) => h.turnIndex === turnIndex
                     ) ?? []
+                  if (!isOperatorTurn) highlights = []
+                  else {
+                    const negative = highlights.filter(
+                      (h) =>
+                        h.type === "missed_action" || h.type === "red_flag"
+                    )
+                    if (negative.length > 1) {
+                      highlights = [
+                        ...highlights.filter(
+                          (h) =>
+                            h.type !== "missed_action" && h.type !== "red_flag"
+                        ),
+                        negative[0],
+                      ]
+                    }
+                  }
                   const hasHighlights = highlights.length > 0
                   return (
                     <div
@@ -436,7 +453,15 @@ export default function ReviewPage({
                             highlights.every(
                               (h) => h.type === "improvement"
                             ) &&
-                            "ring-primary/40"
+                            "ring-primary/40",
+                          hasHighlights &&
+                            highlights.some((h) => h.type === "good_move") &&
+                            !highlights.some(
+                              (h) =>
+                                h.type === "missed_action" ||
+                                h.type === "red_flag"
+                            ) &&
+                            "ring-emerald-500/50"
                         )}
                       >
                         {turn.text}
@@ -463,12 +488,15 @@ export default function ReviewPage({
                                   h.type === "red_flag" &&
                                     "text-[hsl(var(--warning))]",
                                   h.type === "improvement" &&
-                                    "text-primary"
+                                    "text-primary",
+                                  h.type === "good_move" &&
+                                    "text-emerald-600 dark:text-emerald-400"
                                 )}
                               >
                                 {h.type === "missed_action" && "Missed"}
                                 {h.type === "red_flag" && "Red flag"}
                                 {h.type === "improvement" && "Improvement"}
+                                {h.type === "good_move" && "Good move"}
                               </span>
                               <span className="text-xs font-medium text-foreground">
                                 {h.label}
