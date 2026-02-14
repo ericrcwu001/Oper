@@ -1,11 +1,23 @@
+import path from 'path';
+import fs from 'fs/promises';
 import { Router } from 'express';
 import { randomUUID } from 'crypto';
 import { generateCallDialog, getNextCallerResponse } from '../services/openaiService.js';
 import { textToSpeech } from '../services/elevenlabsService.js';
 import { speechToText } from '../services/whisperService.js';
 import { evaluateCall } from '../services/evaluationService.js';
+import { processCaller911, convertMp3ToWav } from '../utils/911audio.js';
+import { config } from '../config.js';
 
 const router = Router();
+
+async function unlinkSafe(filePath) {
+  try {
+    await fs.unlink(filePath);
+  } catch {
+    // ignore
+  }
+}
 
 /** Filler sample scenario used when none is provided (e.g. for quick testing). */
 const SAMPLE_SCENARIO =
@@ -73,15 +85,52 @@ function parseScenarioBody(body) {
     const fullScenario = fullScenarioFromGeneratorPayload(raw);
     return { fullScenario: fullScenario || SAMPLE_SCENARIO, voiceOptions: raw };
   }
-  // Simple object: { scenarioDescription, callerDescription }
+  // Simple object: { scenarioDescription, callerDescription, difficulty? }
   const scenarioDescription =
     typeof raw.scenarioDescription === 'string' ? raw.scenarioDescription.trim() : '';
   const callerDescription =
     typeof raw.callerDescription === 'string' ? raw.callerDescription.trim() : undefined;
+  const difficulty =
+    typeof raw.difficulty === 'string' && ['easy', 'medium', 'hard'].includes(raw.difficulty.toLowerCase())
+      ? raw.difficulty.toLowerCase()
+      : undefined;
   const fullScenario = scenarioDescription
     ? (callerDescription ? `${scenarioDescription} Caller: ${callerDescription}.` : scenarioDescription)
     : SAMPLE_SCENARIO;
-  return { fullScenario, voiceOptions: callerDescription || undefined };
+  const voiceOptions =
+    scenarioDescription || callerDescription || difficulty
+      ? { scenarioDescription, callerDescription, difficulty }
+      : undefined;
+  return { fullScenario, voiceOptions };
+}
+
+/**
+ * Run 911 phone-chain on TTS MP3. On success returns { audioUrl } for the .wav.
+ * If ffmpeg is missing (ENOENT) or processing fails, returns { audioUrl } for the original .mp3.
+ */
+async function apply911PipelineOrFallback(id, mp3Path) {
+  const dir = path.dirname(mp3Path);
+  const preWavPath = path.join(dir, `${id}_pre.wav`);
+  const outWavPath = path.join(dir, `${id}.wav`);
+  try {
+    await convertMp3ToWav(mp3Path, preWavPath);
+    await processCaller911({ inWavPath: preWavPath, outWavPath, addNoise: true });
+    // Keep only the final .wav; remove intermediate pre-wav and source mp3
+    await unlinkSafe(preWavPath);
+    await unlinkSafe(mp3Path);
+    return {
+      audioUrl: `${config.baseUrl.replace(/\/$/, '')}/${config.generatedAudioDir}/${id}.wav`,
+    };
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.message?.includes('spawn ffmpeg')) {
+      console.warn('ffmpeg not found or failed; serving original TTS audio. Install ffmpeg for 911 phone effect.');
+    } else {
+      console.warn('911 audio processing failed:', err.message);
+    }
+    return {
+      audioUrl: `${config.baseUrl.replace(/\/$/, '')}/${config.generatedAudioDir}/${id}.mp3`,
+    };
+  }
 }
 
 /**
@@ -111,13 +160,16 @@ router.post('/generate-call-audio', async (req, res) => {
       });
     }
 
-    // 1. Generate dialog from scenario (OpenAI)
-    const transcript = await generateCallDialog(fullScenario);
+    // 1. Generate dialog from scenario (OpenAI); pass persona payload when available for persona-based dialogue
+    const transcript = await generateCallDialog(fullScenario, voiceOptions);
 
     // 2. Convert dialog to audio (ElevenLabs); voiceOptions = string (legacy) or scenario generator payload (voice + persona settings)
     const id = randomUUID();
-    const filename = `${id}.mp3`;
-    const { audioUrl } = await textToSpeech(transcript, filename, voiceOptions);
+    const filenameMp3 = `${id}.mp3`;
+    const { filePath: mp3Path } = await textToSpeech(transcript, filenameMp3, voiceOptions);
+
+    // 3. Optionally run 911 phone-chain (requires ffmpeg); fallback to original MP3
+    const { audioUrl } = await apply911PipelineOrFallback(id, mp3Path);
 
     return res.status(200).json({
       audioUrl,
@@ -222,17 +274,19 @@ router.post('/interact', async (req, res) => {
 
     const conversationHistory = parseConversationHistory(rawHistory);
 
-    // Generate next caller response (GPT-4) with full context
+    // Generate next caller response (GPT-4) with full context and optional persona
     const nextCallerText = await getNextCallerResponse(
       scenario,
       conversationHistory,
-      operatorMessage
+      operatorMessage,
+      voiceOptions
     );
 
-    // Convert to audio (ElevenLabs), using caller description for voice selection
+    // Convert to audio (ElevenLabs), then optionally 911 phone-chain (requires ffmpeg)
     const id = randomUUID();
-    const filename = `${id}.mp3`;
-    const { audioUrl } = await textToSpeech(nextCallerText, filename, voiceOptions);
+    const filenameMp3 = `${id}.mp3`;
+    const { filePath: mp3Path } = await textToSpeech(nextCallerText, filenameMp3, voiceOptions);
+    const { audioUrl } = await apply911PipelineOrFallback(id, mp3Path);
 
     // Build updated history for next request (client should send this back)
     const updatedHistory = [

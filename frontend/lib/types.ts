@@ -24,10 +24,12 @@ export interface Scenario {
   language: Language
 }
 
-/** Payload sent to backend for generate-call-audio and interact (scenario + caller). */
+/** Payload sent to backend for generate-call-audio and interact (scenario + caller + optional difficulty). */
 export interface ScenarioPayload {
   scenarioDescription: string
   callerDescription: string
+  /** Selected difficulty (easy/medium/hard); sent so backend can tailor dialogue. */
+  difficulty?: Difficulty
 }
 
 export interface TranscriptTurn {
