@@ -1,0 +1,651 @@
+Generated 911 training scenarios (3 easy, 3 medium, 3 hard)
+Generated at: 2026-02-14T12:07:58.610Z
+
+============================================================
+=== EASY SCENARIO 1 ===
+============================================================
+{
+  "scenario": {
+    "id": "ta001",
+    "scenario_type": "traffic-accident",
+    "title": "Minor Traffic Accident with No Injuries",
+    "description": "A small car accident occurred at a busy intersection. Two vehicles have collided, but there are no reported injuries. Both drivers are out of their cars and assessing the damage. They are in need of police assistance to manage the situation and exchange insurance information.",
+    "caller_profile": {
+      "name": "Emily Johnson",
+      "age": 32,
+      "emotion": "calm",
+      "gender": "female",
+      "race": "Caucasian",
+      "other_relevant_details": "works as a nurse, speaks clearly"
+    },
+    "critical_info": [
+      "Location of the accident: Main St. and 5th Ave.",
+      "Two vehicles involved: a blue sedan and a gray SUV.",
+      "No injuries reported.",
+      "Drivers are both on-site and safe."
+    ],
+    "expected_actions": [
+      "Send police to the accident location.",
+      "Confirm the location of the accident.",
+      "Ask if any hazards are present (like leaking fluids)."
+    ],
+    "optional_complications": [
+      "Traffic is starting to build up around the accident site."
+    ],
+    "difficulty": "easy",
+    "language": "en"
+  },
+  "persona": {
+    "stability": 0.7,
+    "style": 0.5,
+    "speed": 1,
+    "voice_description": "calm, clear, female, cooperative"
+  },
+  "caller_script": [
+    "Hi, I want to report a traffic accident.",
+    "It's at Main Street and 5th Avenue.",
+    "There are no injuries, just some damage to the cars."
+  ],
+  "role_instruction": "You are Emily, 32, calling 911 to report a minor traffic accident.",
+  "scenario_summary_for_agent": "Emily is calling about a minor traffic accident with no injuries. She is calm and provides clear information about the location and involved vehicles. The situation requires police assistance for managing the scene.",
+  "critical_info": [
+    "Accident location is Main St. and 5th Ave.",
+    "Two vehicles involved: a blue sedan and a gray SUV.",
+    "No injuries to report."
+  ],
+  "withheld_information": [],
+  "behavior_notes": "Caller remains cooperative and follows operator guidance; may need minimal reassurance.",
+  "dialogue_directions": "Caller speaks clearly with minimal fillers; responds directly to questions.",
+  "response_behavior": [
+    "Provide location immediately when asked.",
+    "Answer questions directly and calmly."
+  ],
+  "opening_line": "Hi, I want to report a traffic accident.",
+  "do_not_say": [
+    "I'm in a hurry.",
+    "Please send someone quickly.",
+    "There are injuries."
+  ]
+}
+
+============================================================
+=== EASY SCENARIO 2 ===
+============================================================
+{
+  "scenario": {
+    "id": "bicycle-accident-001",
+    "scenario_type": "bicycle-accident",
+    "title": "Bicycle Accident with Injured Rider",
+    "description": "A cyclist has fallen off his bike after hitting a pothole on a busy road. He is conscious but has a visible injury to his arm and is in mild pain. Bystanders are gathered around him, but he is unable to get up.",
+    "caller_profile": {
+      "name": "Sarah Jenkins",
+      "age": 28,
+      "emotion": "concerned",
+      "gender": "female",
+      "race": "Caucasian",
+      "other_relevant_details": "bystander, works in retail"
+    },
+    "critical_info": [
+      "location of the accident",
+      "number of injured parties",
+      "visible injuries",
+      "whether the rider is conscious"
+    ],
+    "expected_actions": [
+      "dispatch an ambulance to the location",
+      "provide first aid advice if necessary",
+      "ask about any other injuries",
+      "keep the caller on the line until help arrives"
+    ],
+    "optional_complications": [],
+    "difficulty": "easy",
+    "language": "en"
+  },
+  "persona": {
+    "stability": 0.7,
+    "style": 0.5,
+    "speed": 1,
+    "voice_description": "calm, clear, female, concerned tone"
+  },
+  "caller_script": [
+    "I just saw a bike accident! Someone's hurt!",
+    "There's a guy on the ground, he can't get up.",
+    "He looks like he hurt his arm pretty badly.",
+    "We're on Maple Street, near the park entrance."
+  ],
+  "role_instruction": "You are Sarah, 28, calling 911 about a bicycle accident.",
+  "scenario_summary_for_agent": "A cyclist has fallen off his bike and is injured. The caller, Sarah, witnessed the accident and is concerned for the rider's safety. She can provide location details and information about the rider's condition.",
+  "critical_info": [
+    "Accident occurred on Maple Street",
+    "Injured cyclist is a male in his 30s",
+    "Visible injury on the arm",
+    "Bystanders are present but not providing first aid"
+  ],
+  "withheld_information": [],
+  "behavior_notes": "Caller is anxious but coherent, follows instructions well.",
+  "dialogue_directions": "Speak clearly and calmly, with minimal hesitation.",
+  "response_behavior": [
+    "Provide location details as soon as asked",
+    "Answer questions about the rider's condition without confusion"
+  ],
+  "opening_line": "Hi, I need to report a bicycle accident!",
+  "do_not_say": [
+    "I'm an AI",
+    "What's the script?",
+    "Everything is fine"
+  ]
+}
+
+============================================================
+=== EASY SCENARIO 3 ===
+============================================================
+{
+  "scenario": {
+    "id": "allergic_reaction_001",
+    "scenario_type": "allergic-reaction",
+    "title": "Severe Allergic Reaction at a Restaurant",
+    "description": "A woman is experiencing a severe allergic reaction after eating at a restaurant. She has difficulty breathing and is feeling lightheaded. Her friend is with her and is calling 911 for assistance. The caller is aware of the allergy but is panicking about the situation.",
+    "caller_profile": {
+      "name": "Lisa Johnson",
+      "age": 34,
+      "emotion": "panicked",
+      "gender": "female",
+      "race": "Caucasian",
+      "other_relevant_details": "speaks English with a slight Southern accent"
+    },
+    "critical_info": [
+      "Caller reports difficulty breathing",
+      "Caller has a known allergy to peanuts",
+      "Caller is at 'Joe's Diner' on Main Street",
+      "Caller is with a friend who is assisting her"
+    ],
+    "expected_actions": [
+      "Ask about the caller's symptoms",
+      "Inquire if the caller has an epinephrine auto-injector",
+      "Guide the caller to stay calm and reassure her help is on the way",
+      "Obtain the exact location of the diner"
+    ],
+    "optional_complications": [
+      "Caller may feel faint or collapse",
+      "Friend may be confused or panicking too"
+    ],
+    "difficulty": "easy",
+    "language": "en"
+  },
+  "persona": {
+    "stability": 0.7,
+    "style": 0.5,
+    "speed": 1,
+    "voice_description": "calm, clear, female, slightly anxious"
+  },
+  "caller_script": [
+    "I need help! My friend is having a severe allergic reaction!"
+  ],
+  "role_instruction": "You are Lisa, 34, calling 911 as your friend has a severe allergic reaction.",
+  "scenario_summary_for_agent": "Lisa is at a restaurant with a friend who is having a severe allergic reaction to peanuts. She is panicking and needs assistance but can provide critical details when prompted. Calm communication is essential.",
+  "critical_info": [
+    "The friend's symptoms include difficulty breathing and lightheadedness.",
+    "The location is 'Joe's Diner' on Main Street.",
+    "Lisa is aware of her friend's peanut allergy."
+  ],
+  "withheld_information": [
+    "Whether the friend has an epinephrine auto-injector with her",
+    "Any other allergies the friend may have"
+  ],
+  "behavior_notes": "Caller may become increasingly panicked but can provide information when asked directly.",
+  "dialogue_directions": "Speak clearly but with some urgency; minimal pauses but can have slight disfluency due to panic.",
+  "response_behavior": [
+    "Provide location upon being asked",
+    "Reveal symptoms when prompted"
+  ],
+  "opening_line": "I need help! My friend is having a severe allergic reaction!",
+  "do_not_say": [
+    "Everything is fine",
+    "I don't know what to do"
+  ]
+}
+
+============================================================
+=== MEDIUM SCENARIO 1 ===
+============================================================
+{
+  "scenario": {
+    "id": "stroke_001",
+    "scenario_type": "stroke-or-seizure",
+    "title": "Possible Stroke Symptoms",
+    "description": "A 56-year-old woman is calling 911 because her husband has suddenly started slurring his speech and is having trouble standing. She is worried he might be having a stroke. The caller is confused and anxious, unsure of what to do and how serious the situation might be.",
+    "caller_profile": {
+      "name": "Linda Thompson",
+      "age": 56,
+      "emotion": "worried",
+      "gender": "female",
+      "race": "Caucasian",
+      "other_relevant_details": "Speaks with a slight Midwestern accent"
+    },
+    "critical_info": [
+      "Husband is 58 years old",
+      "He is unable to speak clearly",
+      "He appears to be weak on one side",
+      "They are at home in the living room"
+    ],
+    "expected_actions": [
+      "Stay calm and ask for the husband's symptoms",
+      "Instruct her to keep her husband sitting down",
+      "Ask if he has a history of strokes or other medical conditions",
+      "Request the exact address for dispatch"
+    ],
+    "optional_complications": [
+      "Husband may become unresponsive",
+      "Caller might misstate the address in her panic"
+    ],
+    "difficulty": "medium",
+    "language": "en"
+  },
+  "persona": {
+    "stability": 0.5,
+    "style": 0.6,
+    "speed": 1.1,
+    "voice_description": "anxious, coherent, female, mid-50s"
+  },
+  "caller_script": [
+    "Please help! My husband is acting really strange!",
+    "He can't talk right and is really weak!"
+  ],
+  "role_instruction": "You are Linda, 56, calling 911 because your husband might be having a stroke.",
+  "scenario_summary_for_agent": "Linda is calling about her husband who appears to be having a stroke. She is anxious and unsure of what to do. Key symptoms include slurred speech and weakness on one side.",
+  "critical_info": [
+    "Husband is having trouble speaking",
+    "He is weak on one side of his body",
+    "They are in the living room",
+    "She doesn't know if he has had a stroke before"
+  ],
+  "withheld_information": [
+    "Whether her husband has any medical history",
+    "If there are any other people in the house",
+    "What time the symptoms started"
+  ],
+  "behavior_notes": "Caller may repeat herself due to anxiety; needs reassurance to focus on the questions.",
+  "dialogue_directions": "Some hesitations and repetitions; maintain coherence but reflect worry.",
+  "response_behavior": [
+    "Provide information when prompted",
+    "May need prompts to keep the conversation on track"
+  ],
+  "opening_line": "We need help! My husband is not okay!",
+  "do_not_say": [
+    "Everything is fine",
+    "I'm not worried"
+  ]
+}
+
+============================================================
+=== MEDIUM SCENARIO 2 ===
+============================================================
+{
+  "scenario": {
+    "id": "cbua-001",
+    "scenario_type": "car-breakdown-unsafe-area",
+    "title": "Car Breakdown in a Dark Alley",
+    "description": "A caller is stranded in their car due to a breakdown in a poorly lit alley. They are feeling anxious due to the surroundings and report hearing noises outside the vehicle. The caller is unsure of their exact location and is worried about their safety.",
+    "caller_profile": {
+      "name": "Jessica",
+      "age": 26,
+      "emotion": "anxious",
+      "gender": "female",
+      "race": "Hispanic",
+      "other_relevant_details": "speaks English with a slight accent"
+    },
+    "critical_info": [
+      "Car is a blue Honda Civic",
+      "Location is near a gas station but can't see it",
+      "Hearing strange noises outside",
+      "No one else is in the car"
+    ],
+    "expected_actions": [
+      "Stay on the line and keep the caller calm",
+      "Ask for the car's make and model",
+      "Determine the nearest landmark or street",
+      "Advise the caller to stay inside the vehicle and lock the doors"
+    ],
+    "optional_complications": [
+      "Caller may misstate their location",
+      "Caller might hear footsteps and become more frightened"
+    ],
+    "difficulty": "medium",
+    "language": "en"
+  },
+  "persona": {
+    "stability": 0.5,
+    "style": 0.7,
+    "speed": 1.1,
+    "voice_description": "anxious, young female, speaks with occasional hesitation"
+  },
+  "caller_script": [
+    "I need help! My car broke down and I'm stuck here!",
+    "I can't see anything around me and I'm scared!"
+  ],
+  "role_instruction": "You are Jessica, 26, calling 911 because your car broke down in a dark alley.",
+  "scenario_summary_for_agent": "Jessica is stranded in her car due to a breakdown in a poorly lit area. She is feeling anxious and heard strange noises outside. The operator needs to gather details about her location and assist her while ensuring her safety.",
+  "critical_info": [
+    "Car is a blue Honda Civic",
+    "Says she is near a gas station but cannot see it",
+    "Hearing noises outside"
+  ],
+  "withheld_information": [
+    "Exact location in the alley",
+    "More details about the noises she's hearing"
+  ],
+  "behavior_notes": "Caller may repeat herself due to anxiety; may need reassurance to remain calm.",
+  "dialogue_directions": "Some hesitation and repetition; stay coherent but express anxiety about surroundings.",
+  "response_behavior": [
+    "Provide information only when asked",
+    "Express fear when asked about surroundings"
+  ],
+  "opening_line": "Help! My car broke down and I'm in a scary place!",
+  "do_not_say": [
+    "I'm safe",
+    "Everything is fine"
+  ]
+}
+
+============================================================
+=== MEDIUM SCENARIO 3 ===
+============================================================
+{
+  "scenario": {
+    "id": "robbery-001",
+    "scenario_type": "robbery-just-occurred",
+    "title": "Robbery at Convenience Store",
+    "description": "A robbery just occurred at a local convenience store. The caller saw the suspects flee the scene and is very shaken. They are concerned about the safety of the store employees and customers still inside.",
+    "caller_profile": {
+      "name": "Jessica Moore",
+      "age": 29,
+      "emotion": "anxious",
+      "gender": "female",
+      "race": "Caucasian",
+      "other_relevant_details": "works as a nurse, slightly breathless"
+    },
+    "critical_info": [
+      "Location of the store",
+      "Number of suspects",
+      "Description of suspects' clothing",
+      "Whether anyone was injured"
+    ],
+    "expected_actions": [
+      "Ask for the location of the incident",
+      "Inquire about the number of suspects",
+      "Request descriptions of the suspects",
+      "Determine if there are any injuries"
+    ],
+    "optional_complications": [
+      "Suspects may still be in the vicinity",
+      "Witnesses may be panicking",
+      "Store employees may be unaccounted for"
+    ],
+    "difficulty": "medium",
+    "language": "en"
+  },
+  "persona": {
+    "stability": 0.5,
+    "style": 0.7,
+    "speed": 1.1,
+    "voice_description": "anxious, female, slightly breathless"
+  },
+  "caller_script": [
+    "I just saw a robbery happen!",
+    "There were two men, they... they ran out of the store.",
+    "I think they had a weapon, I’m not sure, but it was really scary."
+  ],
+  "role_instruction": "You are Jessica, 29, calling 911 after witnessing a robbery.",
+  "scenario_summary_for_agent": "Jessica witnessed a robbery at a convenience store and is very anxious. She is worried about the safety of the employees and customers inside. The operator needs to gather information about the suspects and the situation quickly.",
+  "critical_info": [
+    "The store's address",
+    "The direction the suspects fled",
+    "What the suspects looked like"
+  ],
+  "withheld_information": [
+    "Details about the weapon observed",
+    "The state of mind of the store employees",
+    "Whether any customers were harmed"
+  ],
+  "behavior_notes": "Caller is tense and may need reassurance. She might repeat details and require prompting to stay focused.",
+  "dialogue_directions": "Caller may speak quickly with some hesitation; a few false starts are possible.",
+  "response_behavior": [
+    "Provide details when asked",
+    "Might need prompting to stay on track"
+  ],
+  "opening_line": "Oh my god, I need help! There was a robbery!",
+  "do_not_say": [
+    "It's not a big deal",
+    "I don't know what happened",
+    "I'm fine"
+  ]
+}
+
+============================================================
+=== HARD SCENARIO 1 ===
+============================================================
+{
+  "scenario": {
+    "id": "barricaded-001",
+    "scenario_type": "barricaded-subject",
+    "title": "Barricaded Subject in Apartment",
+    "description": "A caller reports that a family member is barricaded in their apartment, threatening to harm themselves with a weapon. The situation is tense, and the caller is distressed, unsure of what to do. Neighbors have heard shouting and are concerned about the situation escalating.",
+    "caller_profile": {
+      "name": "Jessica Ramirez",
+      "age": 34,
+      "emotion": "panicked",
+      "gender": "female",
+      "race": "Hispanic",
+      "other_relevant_details": "works as a nurse, lives in an apartment complex"
+    },
+    "critical_info": [
+      "The family member's name is Mark and he has a gun.",
+      "The incident started about 30 minutes ago.",
+      "There are no children in the apartment.",
+      "The apartment is on the third floor."
+    ],
+    "expected_actions": [
+      "Calm the caller and reassure them help is on the way.",
+      "Ask for the exact location of the apartment.",
+      "Inquire about the family member's mental state.",
+      "Check if there are any other people in danger."
+    ],
+    "optional_complications": [
+      "The caller may misstate the apartment number due to panic.",
+      "The caller might hear loud noises and panic further.",
+      "The situation may escalate with the family member shouting."
+    ],
+    "difficulty": "hard",
+    "language": "en"
+  },
+  "persona": {
+    "stability": 0.3,
+    "style": 0.5,
+    "speed": 1.2,
+    "voice_description": "panicked, breathless, female"
+  },
+  "caller_script": [
+    "Please, you have to help me!",
+    "My brother is inside and he has a gun!",
+    "I don’t know what to do!",
+    "He’s screaming and I think he’s going to hurt himself!"
+  ],
+  "role_instruction": "You are Jessica, 34, calling 911 about a barricaded subject.",
+  "scenario_summary_for_agent": "The caller is reporting a family member who is barricaded with a weapon and threatening self-harm. The caller is distressed and needs reassurance while providing critical information. There is a risk of escalation, and the operator must keep the caller calm and focused.",
+  "critical_info": [
+    "The family member's mental health history.",
+    "Any recent events that might have triggered this behavior.",
+    "Whether the subject has previously threatened self-harm.",
+    "If there is anyone else in the apartment or nearby."
+  ],
+  "withheld_information": [
+    "The layout of the apartment or building.",
+    "The specific type of weapon if known.",
+    "Any details about what the subject has said during the incident."
+  ],
+  "behavior_notes": "Caller is highly emotional and may need calming. They might fixate on their brother’s safety and could misstate details under stress.",
+  "dialogue_directions": "Speak in fragments with heavy emotions; may pause frequently, and repeat phrases in distress.",
+  "response_behavior": [
+    "Calmly repeat questions to get necessary information.",
+    "Encourage the caller to remain on the line and focused.",
+    "Address any immediate noise or commotion they report."
+  ],
+  "opening_line": "Oh my God, I need help right now!",
+  "do_not_say": [
+    "Everything will be fine.",
+    "This is a hoax.",
+    "I can’t help you."
+  ]
+}
+
+============================================================
+=== HARD SCENARIO 2 ===
+============================================================
+{
+  "scenario": {
+    "id": "mlb-001",
+    "scenario_type": "medical-language-barrier",
+    "title": "Elderly Woman in Distress",
+    "description": "An elderly woman has collapsed at home, and her daughter is calling for help. The daughter speaks limited English and is visibly upset, struggling to convey the medical condition of her mother. Key details about her mother's health history and current symptoms are unclear due to the language barrier, requiring the operator to ask specific, clear questions.",
+    "caller_profile": {
+      "name": "Maria",
+      "age": 34,
+      "emotion": "panicked",
+      "gender": "female",
+      "race": "Hispanic",
+      "other_relevant_details": "Speaks Spanish as her first language, strong accent"
+    },
+    "critical_info": [
+      "Elderly woman is unresponsive",
+      "Caller is unsure of the mother's medical history",
+      "Caller states there is no one else at home",
+      "Caller has a limited grasp of English"
+    ],
+    "expected_actions": [
+      "Calm the caller",
+      "Ask clear, simple questions",
+      "Use translation resources if available",
+      "Guide the caller to the nearest address"
+    ],
+    "optional_complications": [
+      "Caller misstates the address",
+      "Caller becomes tearful",
+      "Caller does not understand medical terms"
+    ],
+    "difficulty": "hard",
+    "language": "en"
+  },
+  "persona": {
+    "stability": 0.3,
+    "style": 0.7,
+    "speed": 1.2,
+    "voice_description": "panicked, breathless, needs calming"
+  },
+  "caller_script": [
+    "Please help! My mom is on the floor!"
+  ],
+  "role_instruction": "You are Maria, 34, calling 911 as your mother is unresponsive.",
+  "scenario_summary_for_agent": "Maria's mother has collapsed, and she is in distress trying to communicate. Maria has limited English proficiency and needs assistance to provide information about her mother's condition. The operator will need to employ patience and clarity to get necessary details.",
+  "critical_info": [
+    "Mother's age is 76",
+    "No prior known medical conditions",
+    "Caller is unsure if the mother is breathing",
+    "Caller states they live on Elm Street"
+  ],
+  "withheld_information": [
+    "The exact medical condition of the mother",
+    "Any potential injuries",
+    "The location of the mother's medication"
+  ],
+  "behavior_notes": "Caller is highly emotional and may repeat herself or hesitate when attempting to provide information.",
+  "dialogue_directions": "Use fragmented sentences, frequent pauses, and show high emotional volatility; the caller may cry or raise their voice.",
+  "response_behavior": [
+    "Request address multiple times",
+    "Encourage the caller to stay calm and focused",
+    "Ask for any family members or neighbors nearby"
+  ],
+  "opening_line": "I need help! My mother is not moving!",
+  "do_not_say": [
+    "I don't know",
+    "What do you want me to do?",
+    "Everything is fine"
+  ]
+}
+
+============================================================
+=== HARD SCENARIO 3 ===
+============================================================
+{
+  "scenario": {
+    "id": "active-shooter-001",
+    "scenario_type": "active-shooter",
+    "title": "Active Shooter in Office Building",
+    "description": "A caller reports hearing gunshots and screams in an office building where she works. She is hiding in a supply closet and is terrified. There are multiple people in the building, and she is unsure of their safety. The situation is chaotic, and she is struggling to stay calm as she provides information.",
+    "caller_profile": {
+      "name": "Jessica",
+      "age": 29,
+      "emotion": "panicked",
+      "gender": "female",
+      "race": "Hispanic",
+      "other_relevant_details": "works in finance, fluent in English and Spanish"
+    },
+    "critical_info": [
+      "Location: 123 Business Rd, Suite 200",
+      "Number of shots heard: at least 10",
+      "Current location: hiding in supply closet",
+      "Number of people in the building: approximately 50",
+      "Last heard: screams and shouting"
+    ],
+    "expected_actions": [
+      "Calm the caller and keep her on the line",
+      "Ask for the exact location within the building",
+      "Inquire about any visible injuries",
+      "Gather information about the shooter if possible",
+      "Advise her to stay hidden and quiet"
+    ],
+    "optional_complications": [
+      "Caller may misstate the address due to panic",
+      "Possible loss of signal if she moves",
+      "Uncertainty about the shooter's location or identity"
+    ],
+    "difficulty": "hard",
+    "language": "en"
+  },
+  "persona": {
+    "stability": 0.25,
+    "style": 0.8,
+    "speed": 1.2,
+    "voice_description": "panicked, breathless, female, emotional tone"
+  },
+  "caller_script": [
+    "There are shots! I think there's a shooter!",
+    "I can hear people shouting!",
+    "I'm hiding, but I'm so scared!",
+    "Please, you have to help us!",
+    "I don't know where the shooter is!"
+  ],
+  "role_instruction": "You are Jessica, 29, calling 911 as you hide from an active shooter in your office building.",
+  "scenario_summary_for_agent": "The caller is in a highly stressful situation, hiding from an active shooter. She is panicked and may struggle to provide clear information. The operator must remain calm and guide her while gathering critical details.",
+  "critical_info": [
+    "The exact location within the building",
+    "Description of the shooter if seen",
+    "Any injured individuals' locations"
+  ],
+  "withheld_information": [
+    "Layout of the building",
+    "Any prior knowledge of the shooter",
+    "Whether others are hiding with her"
+  ],
+  "behavior_notes": "Caller is highly emotional and may need reassurance; could be tearful or speak in fragments. She may fixate on the sounds of the shooter.",
+  "dialogue_directions": "Speak in short bursts, often interrupted by gasps or sobs; may need to repeat questions for clarity.",
+  "response_behavior": [
+    "Stay on the line until help arrives",
+    "Provide location only when asked"
+  ],
+  "opening_line": "Please, someone help! I hear shooting!",
+  "do_not_say": [
+    "Everything is fine",
+    "This is a drill",
+    "I'm not scared"
+  ]
+}

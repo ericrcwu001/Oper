@@ -1,0 +1,11 @@
+---
+description: Backend must use Express only; no other server frameworks
+globs: backend/**/*.js
+alwaysApply: false
+---
+
+# Backend: Express Only
+
+- Use **Express** for all backend HTTP APIs and server logic.
+- Do not introduce or use other server frameworks (e.g. Flask, FastAPI, Koa, Fastify, Hapi).
+- New routes, middleware, and server entry points should be Express-based in the existing `backend/src` Node app.
