@@ -1,5 +1,5 @@
-/** Point type for map markers (911 call vs police/fire/ambulance). */
-export type MapPointType = "911" | "police" | "fire" | "ambulance"
+/** Point type for map markers (911 call vs police/fire/ambulance vs crime dot). */
+export type MapPointType = "911" | "police" | "fire" | "ambulance" | "crime"
 
 /** Optional popup fields for 911 calls. */
 export interface MapPoint911Popup {
@@ -15,7 +15,8 @@ export interface MapPointResourcePopup {
   location?: string
   officerInCharge?: string
   unitId?: string
-  status?: string
+  /** true = en route, false = idle/roaming */
+  status?: boolean
 }
 
 /** Single point on the SF map. Position is lat/lng; parent updates for movement. */
@@ -36,5 +37,6 @@ export interface MapPoint {
   // Resource popup fields
   officerInCharge?: string
   unitId?: string
-  status?: string
+  /** true = en route, false = idle/roaming */
+  status?: boolean
 }

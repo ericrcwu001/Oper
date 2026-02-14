@@ -15,6 +15,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
 import { pointAtDistanceM } from "../src/utils/geo.js";
+import { getOfficerForUnit } from "../src/utils/officerNames.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -63,15 +64,16 @@ function randomSpeed(type) {
 function spawnVehicles(graph) {
   const { nodes, edges, adjacency } = graph;
   const vehicles = [];
-  let idx = 0;
   for (const [type, count] of Object.entries(COUNTS)) {
     for (let i = 0; i < count; i++) {
       const edgeIdx = Math.floor(Math.random() * edges.length);
       const edge = edges[edgeIdx];
       const t = Math.random();
       const towardEnd = Math.random() < 0.5;
+      const id = `${type}-${i + 1}`;
+      const { name: officerInCharge, status } = getOfficerForUnit(id);
       vehicles.push({
-        id: `${type}-${i + 1}`,
+        id,
         type,
         currentEdge: edgeIdx,
         t,
@@ -79,8 +81,9 @@ function spawnVehicles(graph) {
         targetNode: towardEnd ? edge.toNodeIdx : edge.fromNodeIdx,
         speedMetersPerSecond: randomSpeed(type),
         pauseRemainingSeconds: 0,
+        officerInCharge,
+        status,
       });
-      idx++;
     }
   }
   return vehicles;
@@ -171,7 +174,8 @@ function toMapPoint(vehicle, [lat, lng]) {
     lat,
     lng,
     unitId: vehicle.id,
-    status: "en route",
+    officerInCharge: vehicle.officerInCharge,
+    status: vehicle.status,
   };
 }
 

@@ -18,6 +18,7 @@ export interface InteractResponse {
 }
 
 import type { ScenarioPayload } from "@/lib/types"
+import type { MapPoint } from "@/lib/map-types"
 
 /** Full scenario payload from POST /api/scenarios/generate (backend scenarioGenerator). */
 export interface GeneratedScenarioPayload {
@@ -73,13 +74,11 @@ export type CallScenarioInput =
  * Fetch current simulated vehicle positions (GET /api/vehicles).
  * Returns MapPoint-compatible array; empty if simulation not running or unavailable.
  */
-export async function fetchVehicles(): Promise<
-  { id: string; type: string; lat: number; lng: number; unitId?: string; status?: string }[]
-> {
+export async function fetchVehicles(): Promise<MapPoint[]> {
   const res = await fetch(`${API_BASE}/api/vehicles`)
   if (!res.ok) return []
   const data = await res.json()
-  return Array.isArray(data) ? data : []
+  return (Array.isArray(data) ? data : []) as MapPoint[]
 }
 
 export async function generateScenario(
@@ -275,4 +274,35 @@ export async function assessCallTranscript(
     )
   }
   return res.json() as Promise<AssessCallTranscriptResponse>
+}
+
+/** One crime from GET /api/crimes (SF CSV, time-ordered for 3x sim). */
+export interface CrimeRecord {
+  id: string
+  lat: number
+  lng: number
+  simSecondsFromMidnight: number
+  category?: string
+  address?: string
+  description?: string
+}
+
+/**
+ * Fetch crimes for a simulation day (GET /api/crimes?date=YYYY-MM-DD).
+ * If date is omitted, backend returns a random day from the dataset.
+ */
+export async function fetchCrimesDay(
+  date?: string
+): Promise<{ date: string; crimes: CrimeRecord[] }> {
+  const url = date
+    ? `${API_BASE}/api/crimes?date=${encodeURIComponent(date)}`
+    : `${API_BASE}/api/crimes`
+  const res = await fetch(url)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(
+      (err as { error?: string }).error ?? "Failed to load crimes"
+    )
+  }
+  return res.json() as Promise<{ date: string; crimes: CrimeRecord[] }>
 }

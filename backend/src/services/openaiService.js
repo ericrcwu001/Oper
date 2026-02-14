@@ -11,13 +11,13 @@ const DEFAULT_DIALOGUE_GUIDANCE = `Sound natural and clear. Use at most one brie
 function getDifficultyGuidance(payload) {
   const d = payload?.scenario?.difficulty || payload?.difficulty;
   if (d === 'easy') {
-    return 'Speak clearly and cooperatively. Give key details (location, what happened) without needing to be asked.';
+    return 'Sound worried and concerned—you\'re upset about the emergency, not calm or flat. Give key details (location, what happened) without needing to be asked, but with real emotion, slight urgency, and maybe a few hesitations or fillers.';
   }
   if (d === 'hard') {
-    return 'You are panicking. Do NOT be clear or give critical info unless the operator asks directly. Fragments, repetition, and omission are required.';
+    return 'You are panicking and confused. Do NOT be clear or give critical info unless the operator asks directly. Use fragments, repetition, trailing off, "I don\'t know", "wait—", self-correction, and omission. Add a few natural disfluencies (um, uh, I mean)—not every sentence. Sound genuinely disoriented.';
   }
   if (d === 'medium') {
-    return 'Sound stressed but understandable. You may need one prompt to refocus; then give the info asked for.';
+    return 'Sound clearly stressed and emotional. Hesitate, repeat yourself, lose your train of thought. Use natural disfluencies (um, uh, I mean). You may need the operator to refocus you; when you answer, still sound worried and uneven—not smooth or composed.';
   }
   return DEFAULT_DIALOGUE_GUIDANCE;
 }
@@ -48,18 +48,18 @@ function buildPersonaInstructions(payload, isOpening) {
     parts.push(`How to speak: ${dialogueDir}`);
   } else if (difficulty === 'easy') {
     parts.push(
-      'How to speak: Calm and composed. Speak in full, clear sentences. No stuttering or filler. Give key details (location, what happened) without needing to be asked. The operator should not have to prompt for basic info.'
+      'How to speak: Worried and concerned—you\'re upset about what\'s happening, not calm or robotic. Give key details (location, what happened) without needing to be asked, but with real emotion: some urgency, maybe a few ums or hesitations, voice that shows you care. The operator should not have to prompt for basic info, but you should still sound like someone in an emergency, not a rehearsed script.'
     );
   } else if (difficulty === 'hard') {
     parts.push(
-      'How to speak: You are panicking and NOT communicating clearly. Speak in fragments, interrupt yourself, repeat the same phrase, cry or gasp. Do NOT volunteer the address or key facts—only give them when the operator explicitly asks (e.g. "What is your address?"). Focus on emotion or one detail; make the operator work to get location, what happened, and who is involved. Short, broken phrases; the operator must prompt repeatedly for critical information.'
+      'How to speak: You are panicking and confused. Speak in fragments, interrupt yourself, repeat the same phrase, say "I don\'t know" or "wait—" or "I can\'t—", trail off, correct yourself mid-sentence, cry or gasp. Use a few natural fillers (um, uh, I mean) and the occasional false start—not every sentence, so the operator can still follow. Do NOT volunteer the address or key facts—only give them when the operator explicitly asks (e.g. "What is your address?"). Focus on emotion or one detail; make the operator work to get location, what happened, and who is involved. Short, broken phrases; the operator must prompt repeatedly for critical information.'
     );
     parts.push(
-      'When replying: Do NOT give address, exact location, or full details unless the operator asks directly. Answer only what was asked, and briefly. If they do not ask for the address, do not say it. If they ask "What is your emergency?" give a chaotic, emotional answer that omits key facts so they have to ask follow-ups.'
+      'When replying: Do NOT give address, exact location, or full details unless the operator asks directly. Answer only what was asked, and briefly. If they do not ask for the address, do not say it. If they ask "What is your emergency?" give a chaotic, confused, emotional answer that omits key facts so they have to ask follow-ups.'
     );
   } else {
     parts.push(
-      'How to speak: Anxious and stressed. Some hesitation, maybe one repetition or tangent. You can give important info when asked but may need the operator to ask twice or refocus you once. Not fully calm; not incoherent.'
+      'How to speak: Clearly anxious and stressed—emotionally engaged, not calm or flat. Hesitate, repeat yourself, lose your train of thought. Use natural disfluencies (um, uh, I mean) and maybe a false start. You can give important info when asked but may need the operator to refocus you; when you answer, still sound worried and uneven, not smooth or composed.'
     );
   }
 

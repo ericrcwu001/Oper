@@ -41,10 +41,21 @@ Vehicle positions are kept in memory. GET /api/vehicles returns the current stat
 
 ```json
 [
-  { "id": "fire-1", "type": "fire", "lat": 37.78, "lng": -122.42, "unitId": "fire-1", "status": "en route" },
+  {
+    "id": "fire-1",
+    "type": "fire",
+    "lat": 37.78,
+    "lng": -122.42,
+    "unitId": "fire-1",
+    "officerInCharge": "Marcus Chen",
+    "status": true
+  },
   ...
 ]
 ```
+
+- `officerInCharge`: string, officer name assigned to the unit
+- `status`: boolean — `true` = en route, `false` = idle (roaming/available)
 
 - Ensure the backend server is running (`npm run dev` or `npm start`)
 - Frontend can poll every 1s and merge with 911/call points into `mapPoints`
