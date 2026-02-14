@@ -77,6 +77,19 @@ export type CallScenarioInput =
 /**
  * Generate a new scenario from the backend (POST /api/scenarios/generate).
  */
+/**
+ * Fetch current simulated vehicle positions (GET /api/vehicles).
+ * Returns MapPoint-compatible array; empty if simulation not running or unavailable.
+ */
+export async function fetchVehicles(): Promise<
+  { id: string; type: string; lat: number; lng: number; unitId?: string; status?: string }[]
+> {
+  const res = await fetch(`${API_BASE}/api/vehicles`)
+  if (!res.ok) return []
+  const data = await res.json()
+  return Array.isArray(data) ? data : []
+}
+
 export async function generateScenario(
   difficulty: "easy" | "medium" | "hard"
 ): Promise<GeneratedScenarioPayload> {

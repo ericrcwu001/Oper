@@ -28,6 +28,10 @@ const SPEED_BASE = { fire: 13, police: 11, ambulance: 13 }; // m/s
 const SPEED_VARIANCE = 0.15;
 const DT_SECONDS = 0.1;
 const WRITE_INTERVAL_MS = 1000;
+const PAUSE_AT_NODE_PROBABILITY = 0.4;
+const PAUSE_MIN_SECONDS = 0.5;
+const PAUSE_MAX_SECONDS = 2.5;
+const MIN_NODE_DEGREE_FOR_PAUSE = 2;
 
 function loadGraph() {
   if (fs.existsSync(GRAPH_PATH)) {
@@ -74,6 +78,7 @@ function spawnVehicles(graph) {
         towardEnd,
         targetNode: towardEnd ? edge.toNodeIdx : edge.fromNodeIdx,
         speedMetersPerSecond: randomSpeed(type),
+        pauseRemainingSeconds: 0,
       });
       idx++;
     }
@@ -100,7 +105,19 @@ function pickNextEdge(graph, vehicle) {
   vehicle.t = fromNext ? 0 : 1;
 }
 
+function maybePauseAtNode(graph, vehicle, atNodeIdx) {
+  const degree = graph.adjacency[atNodeIdx].length;
+  if (degree < MIN_NODE_DEGREE_FOR_PAUSE || Math.random() >= PAUSE_AT_NODE_PROBABILITY) return;
+  vehicle.pauseRemainingSeconds =
+    PAUSE_MIN_SECONDS + Math.random() * (PAUSE_MAX_SECONDS - PAUSE_MIN_SECONDS);
+}
+
 function advanceVehicle(graph, vehicle) {
+  if (vehicle.pauseRemainingSeconds > 0) {
+    vehicle.pauseRemainingSeconds = Math.max(0, vehicle.pauseRemainingSeconds - DT_SECONDS);
+    return;
+  }
+
   const edge = graph.edges[vehicle.currentEdge];
   const segLen = edge.lengthM;
   const dist = vehicle.speedMetersPerSecond * DT_SECONDS;
@@ -110,8 +127,10 @@ function advanceVehicle(graph, vehicle) {
 
   while (t > 1 || t < 0) {
     if (t >= 1) {
+      const atNode = edge.toNodeIdx;
       const carry = (t - 1) * segLen;
       pickNextEdge(graph, vehicle);
+      maybePauseAtNode(graph, vehicle, atNode);
       const nextEdge = graph.edges[vehicle.currentEdge];
       if (!nextEdge || carry <= 0) {
         vehicle.t = vehicle.towardEnd ? 0 : 1;
@@ -122,8 +141,10 @@ function advanceVehicle(graph, vehicle) {
       return;
     }
     if (t <= 0) {
+      const atNode = edge.fromNodeIdx;
       const carry = -t * segLen;
       pickNextEdge(graph, vehicle);
+      maybePauseAtNode(graph, vehicle, atNode);
       const nextEdge = graph.edges[vehicle.currentEdge];
       if (!nextEdge || carry <= 0) {
         vehicle.t = vehicle.towardEnd ? 0 : 1;
