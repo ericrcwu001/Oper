@@ -40,18 +40,24 @@ import type {
   ScenarioType,
   Scenario,
   NoteEntry,
+  Difficulty,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 const GENERATED_SCENARIO_STORAGE_KEY = "simulation-generated-scenario"
 
-function buildScenarioPayload(scenario: Scenario): {
+function buildScenarioPayload(
+  scenario: Scenario,
+  difficulty?: Difficulty
+): {
   scenarioDescription: string
   callerDescription: string
+  difficulty?: Difficulty
 } {
   return {
     scenarioDescription: scenario.description,
     callerDescription: scenario.callerDescription,
+    difficulty: difficulty ?? scenario.difficulty,
   }
 }
 
@@ -77,6 +83,7 @@ export default function LiveSimulationPage({
   const searchParams = useSearchParams()
   const scenarioId = searchParams.get("scenario") || "scenario-1"
   const hintsEnabled = searchParams.get("hints") === "true"
+  const selectedDifficulty = (searchParams.get("difficulty") as Difficulty) || "medium"
 
   const [generatedScenario, setGeneratedScenario] =
     useState<GeneratedScenarioPayload | null>(null)
@@ -180,7 +187,8 @@ export default function LiveSimulationPage({
     }
   }, [callActive, hintsEnabled, hintActions])
 
-  const scenarioForApi = generatedScenario ?? buildScenarioPayload(scenario)
+  const scenarioForApi =
+    generatedScenario ?? buildScenarioPayload(scenario, selectedDifficulty)
 
   const handleStartCall = async () => {
     if (scenarioId === "generated" && !generatedScenario) {

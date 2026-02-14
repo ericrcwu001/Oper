@@ -23,7 +23,7 @@ export const config = {
     // Default voice ID (used when caller is male or unknown).
     voiceId: process.env.ELEVENLABS_VOICE_ID || 'JBFqnCBsd6RMkjVDRZzb',
     // Optional: voice for female callers. Set ELEVENLABS_VOICE_ID_FEMALE to enable.
-    voiceIdFemale: process.env.ELEVENLABS_VOICE_ID_FEMALE || 'EXAVITQu4vr4xnSDxMaL',
+    voiceIdFemale: process.env.ELEVENLABS_VOICE_ID_FEMALE || 'pFZP5JQG7iQjIQuC4Bku',
     modelId: process.env.ELEVENLABS_MODEL_ID || 'eleven_multilingual_v2',
     outputFormat: 'mp3_44100_128',
   },
