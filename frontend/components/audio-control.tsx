@@ -11,12 +11,15 @@ interface AudioControlProps {
   disabled?: boolean
   /** Called when the current audio clip finishes playing. */
   onPlaybackEnd?: () => void
+  /** When true, use smaller button and slider for a tighter layout. */
+  compact?: boolean
 }
 
 export function AudioControl({
   audioUrl,
   disabled,
   onPlaybackEnd,
+  compact = false,
 }: AudioControlProps) {
   const [playing, setPlaying] = useState(false)
   const [volume, setVolume] = useState([75])
@@ -62,7 +65,7 @@ export function AudioControl({
   }
 
   return (
-    <div className="flex items-center gap-3">
+    <div className={`flex items-center min-w-0 ${compact ? "gap-2" : "gap-3"}`}>
       <audio
         ref={audioRef}
         onEnded={handleEnded}
@@ -74,28 +77,28 @@ export function AudioControl({
       <Button
         variant="outline"
         size="icon"
-        className="h-8 w-8"
+        className={compact ? "h-7 w-7 shrink-0" : "h-8 w-8"}
         onClick={handlePlayPause}
         disabled={disabled || !audioUrl}
         aria-label={playing ? "Pause caller audio" : "Play caller audio"}
       >
         {playing ? (
-          <Pause className="h-3.5 w-3.5" />
+          <Pause className={compact ? "h-3 w-3" : "h-3.5 w-3.5"} />
         ) : (
-          <Play className="h-3.5 w-3.5" />
+          <Play className={compact ? "h-3 w-3" : "h-3.5 w-3.5"} />
         )}
       </Button>
-      <Volume2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <Volume2 className={`shrink-0 text-muted-foreground ${compact ? "h-3 w-3" : "h-3.5 w-3.5"}`} />
       <Slider
         value={volume}
         onValueChange={setVolume}
         max={100}
         step={1}
-        className="w-24"
+        className={compact ? "w-16" : "w-24"}
         disabled={disabled}
         aria-label="Caller audio volume"
       />
-      <span className="font-mono text-xs text-muted-foreground">
+      <span className={`font-mono text-muted-foreground shrink-0 ${compact ? "text-[10px]" : "text-xs"}`}>
         {volume[0]}%
       </span>
     </div>

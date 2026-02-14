@@ -57,6 +57,7 @@ import {
   CRIME_RESOLVE_RADIUS_DEG,
   MIN_VEHICLES_AT_SCENE,
   SIM_SECONDS_AT_SCENE_TO_RESOLVE,
+  CRIME_SIM_CLOCK_SPEEDUP,
 } from "@/lib/simulation-constants"
 
 /** Initial map points with hardcoded popup data (no backend). */
@@ -81,7 +82,7 @@ function getInitialMapPoints(): MapPoint[] {
       location: "Mission District",
       officerInCharge: "Sgt. Smith",
       unitId: "PD-12",
-      status: "En route",
+      status: true,
     },
     {
       id: "unit-f1",
@@ -91,7 +92,7 @@ function getInitialMapPoints(): MapPoint[] {
       location: "SOMA",
       officerInCharge: "Capt. Jones",
       unitId: "FD-7",
-      status: "Standing by",
+      status: false,
     },
   ]
 }
@@ -271,6 +272,8 @@ export default function LiveSimulationPage({
     severity: string
     critical?: boolean
     suggestedCount?: number
+    stage?: "preliminary" | "confirming" | "confirmed"
+    latestTrigger?: { rationale: string; severity: string }[]
   } | null>(null)
   const [isAssessingDispatch, setIsAssessingDispatch] = useState(false)
 
@@ -860,50 +863,53 @@ export default function LiveSimulationPage({
           </div>
         )}
 
-        {/* Map - full-width top row (from map/vehicle feature) */}
-        <Card className="mb-4 overflow-hidden border bg-card shrink-0">
-          <div className="relative h-[420px] min-h-[280px] w-full">
-            <SFMap
-              points={mapPoints}
-              selectedPointId={selectedPointId}
-              onSelectPoint={setSelectedPointId}
-              className="absolute inset-0 h-full w-full"
-            />
-            <div className="absolute bottom-3 left-3 z-10 flex flex-wrap gap-4 rounded-md border border-border/80 bg-card/95 px-3 py-2 text-xs shadow-sm backdrop-blur">
-              <span className="flex items-center gap-1.5">
-                <span className="h-2.5 w-2.5 rounded-full bg-[#EF4444]" aria-hidden />
-                911
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="h-2.5 w-2.5 rounded-full bg-[#3B82F6]" aria-hidden />
-                Police
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="h-2.5 w-2.5 rounded-full bg-[#F97316]" aria-hidden />
-                Fire
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="h-2.5 w-2.5 rounded-full bg-[#22C55E]" aria-hidden />
-                Ambulance
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="h-2.5 w-2.5 rounded-full border border-border bg-[#FCD34D]" aria-hidden />
-                Crime
-              </span>
-              {crimesDate && (
-                <span className="text-muted-foreground">Day: {crimesDate}</span>
-              )}
-            </div>
+        {/* Main: Left = Map (50%), Right = Transcript top, Controls | Dispatch bottom */}
+        <div className="flex min-h-0 flex-1 flex-col gap-3 py-3 lg:flex-row">
+          {/* Left half — Map */}
+          <div className="flex min-h-[280px] min-w-0 flex-1 flex-col lg:min-h-0 lg:max-w-[50%]">
+            <Card className="flex min-h-0 flex-1 flex-col overflow-hidden border bg-card">
+              <div className="relative min-h-0 flex-1 w-full">
+                <SFMap
+                  points={mapPoints}
+                  selectedPointId={selectedPointId}
+                  onSelectPoint={setSelectedPointId}
+                  className="absolute inset-0 h-full w-full"
+                />
+                <div className="absolute bottom-3 left-3 z-10 flex flex-wrap gap-4 rounded-md border border-border/80 bg-card/95 px-3 py-2 text-xs shadow-sm backdrop-blur">
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#EF4444]" aria-hidden />
+                    911
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#3B82F6]" aria-hidden />
+                    Police
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#F97316]" aria-hidden />
+                    Fire
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#22C55E]" aria-hidden />
+                    Ambulance
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2.5 w-2.5 rounded-full border border-border bg-[#FFFFFF]" aria-hidden />
+                    Crime
+                  </span>
+                  {crimesDate && (
+                    <span className="text-muted-foreground">Day: {crimesDate} ({CRIME_SIM_CLOCK_SPEEDUP}×)</span>
+                  )}
+                </div>
+              </div>
+            </Card>
           </div>
-        </Card>
 
-        {/* Main: Left = transcript (main), Right = controls + notes + dispatch */}
-        <div className="flex min-h-0 flex-1 flex-col gap-4 py-4 lg:flex-row">
-          {/* Left — Live transcription (main) */}
-          <div className="flex min-h-[240px] min-w-0 flex-1 flex-col lg:min-h-0">
-            <Card className="flex min-h-0 flex-1 flex-col border bg-card overflow-hidden">
-              <CardHeader className="shrink-0 border-b py-3">
-                <CardTitle className="text-base font-medium">Live transcription</CardTitle>
+          {/* Right half — 4 components: transcript (top), then bottom split = controls + dispatch | notes */}
+          <div className="flex min-h-[320px] min-w-0 flex-1 flex-col gap-3 lg:min-h-0">
+            {/* Top half: Live transcription (greatest priority, full width) */}
+            <Card className="flex min-h-0 flex-1 flex-col overflow-hidden border bg-card min-w-0">
+              <CardHeader className="shrink-0 border-b py-2.5">
+                <CardTitle className="text-sm font-medium">Live transcription</CardTitle>
                 <p className="text-xs text-muted-foreground">
                   Caller and operator — scroll to see full conversation
                 </p>
@@ -912,113 +918,120 @@ export default function LiveSimulationPage({
                 <TranscriptFeed turns={transcript} partialText={partialText} />
               </div>
             </Card>
-          </div>
 
-          {/* Right — Compact controls, operator notes, dispatch */}
-          <div className="flex min-h-0 w-full shrink-0 flex-col gap-3 overflow-y-auto lg:min-h-0 lg:w-[360px]">
-            {/* Controls: compact row(s) */}
-            <Card className="shrink-0 border bg-card">
-              <CardContent className="space-y-3 py-3">
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Audio</span>
-                    <AudioControl audioUrl={callerAudioUrl} disabled={!callActive} />
-                  </div>
-                  <MicControl
-                    disabled={!callActive}
-                    onRecordingComplete={handleVoiceRecordingComplete}
-                    sending={apiLoading}
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Type message..."
-                    value={textInput}
-                    onChange={(e) => setTextInput(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") handleSendText() }}
-                    disabled={!callActive}
-                    className="h-8 text-sm"
-                  />
-                  <Button
-                    size="icon"
-                    className="h-8 w-8 shrink-0"
-                    onClick={handleSendText}
-                    disabled={!callActive || !textInput.trim() || apiLoading}
-                    aria-label="Send"
-                  >
-                    {apiLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 shrink-0 gap-1 px-2"
-                    onClick={handleRequestClarification}
-                    disabled={!callActive || apiLoading}
-                    title="Request clarification"
-                  >
-                    <HelpCircle className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Operator notes — main space for dispatcher */}
-            <Card className="flex min-h-0 flex-1 flex-col border bg-card overflow-hidden">
-              <NotesPanel
-                callSeconds={callSeconds}
-                notes={notes}
-                onAddNote={(entry) => setNotes((prev) => [...prev, entry])}
-              />
-            </Card>
-
-            {/* Dispatch (live evaluation) */}
+            {/* Bottom half: split — (Controls + Dispatch) | Notes */}
+            <div className="flex shrink-0 flex-col gap-2 lg:flex-row lg:min-h-0">
+              {/* Left: User controls (mic + level) then Dispatch */}
+              <div className="flex min-w-0 flex-1 flex-col gap-2 overflow-y-auto lg:min-h-0 lg:max-w-[55%]">
+                <Card className="shrink-0 border bg-card">
+                  <CardContent className="flex flex-col gap-2 py-2 px-3 sm:flex-row sm:items-center sm:gap-4 sm:flex-wrap">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground shrink-0 w-14">Caller</span>
+                      <AudioControl audioUrl={callerAudioUrl} disabled={!callActive} compact />
+                    </div>
+                    <div className="flex items-center gap-2 min-w-0 border-t pt-2 sm:border-t-0 sm:pt-0 sm:border-l sm:pl-4">
+                      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground shrink-0 w-10">Mic</span>
+                      <MicControl
+                        disabled={!callActive}
+                        onRecordingComplete={handleVoiceRecordingComplete}
+                        sending={apiLoading}
+                        compact
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+                {/* Dispatch recommendations underneath controls */}
             <Card
               className={cn(
-                "shrink-0 border bg-card transition-shadow",
-                isAssessingDispatch && "shadow-sm ring-1 ring-primary/20"
+                "shrink-0 border bg-card transition-all relative overflow-hidden",
+                callActive && "ring-1 ring-primary/30",
+                isAssessingDispatch && "ring-primary/50 shadow-md"
               )}
             >
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center gap-2 text-sm font-medium">
-                  <Shield className="h-4 w-4 text-primary" />
-                  Dispatch recommendations
+              {callActive && isAssessingDispatch && (
+                <>
+                  <div
+                    className="absolute inset-0 pointer-events-none z-0 opacity-20"
+                    aria-hidden
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-primary/25 to-transparent animate-live-shimmer" />
+                  </div>
+                  <div className="relative z-10 border-b border-primary/30 bg-primary/10 px-3 py-2 flex items-center gap-2">
+                    <span className="inline-flex gap-1">
+                      <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:0ms]" />
+                      <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:150ms]" />
+                      <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:300ms]" />
+                    </span>
+                    <span className="text-xs font-semibold text-primary">LLM analyzing…</span>
+                    <div className="flex-1 h-1 rounded-full bg-primary/20 overflow-hidden ml-1">
+                      <div className="h-full w-1/3 rounded-full bg-primary animate-live-shimmer min-w-[60px]" />
+                    </div>
+                  </div>
+                </>
+              )}
+              <CardHeader className={cn("pb-2 relative z-10", isAssessingDispatch && "pt-2")}>
+                <CardTitle className="flex items-center justify-between gap-2 text-sm font-medium">
+                  <span className="flex items-center gap-2">
+                    <Shield className="h-4 w-4 text-primary" />
+                    Dispatch recommendations
+                  </span>
                   {callActive && (
-                    <span className="flex items-center gap-1.5 text-xs font-normal text-muted-foreground">
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-semibold uppercase tracking-wide",
+                        isAssessingDispatch
+                          ? "bg-primary/15 text-primary border border-primary/40"
+                          : "bg-green-500/15 text-green-700 dark:text-green-400 border border-green-500/40"
+                      )}
+                    >
                       <span
                         className={cn(
-                          "inline-flex h-1.5 w-1.5 rounded-full",
-                          isAssessingDispatch ? "animate-pulse bg-primary" : "bg-green-500"
+                          "h-2 w-2 rounded-full flex-shrink-0",
+                          isAssessingDispatch
+                            ? "bg-primary animate-live-pulse"
+                            : "bg-green-500 animate-live-pulse"
                         )}
-                        />
-                      {isAssessingDispatch ? (
-                        <span className="animate-pulse">Live analyzing…</span>
-                      ) : (
-                        "Live"
-                      )}
+                      />
+                      {isAssessingDispatch ? "Analyzing" : "Live"}
                     </span>
                   )}
                 </CardTitle>
               </CardHeader>
-              <CardContent className="pt-0">
+              <CardContent className="pt-0 relative z-10">
                 {!callActive ? (
                   <p className="text-xs text-muted-foreground">
                     Start a call to see live dispatch suggestions from the caller&apos;s words.
                   </p>
                 ) : isAssessingDispatch && !dispatchRecommendation ? (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span className="inline-flex gap-0.5">
-                      <span className="h-1 w-1 rounded-full bg-current animate-bounce [animation-delay:0ms]" />
-                      <span className="h-1 w-1 rounded-full bg-current animate-bounce [animation-delay:150ms]" />
-                      <span className="h-1 w-1 rounded-full bg-current animate-bounce [animation-delay:300ms]" />
-                    </span>
-                    Analyzing caller…
-                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Waiting for first analysis…
+                  </p>
                 ) : !dispatchRecommendation ? (
                   <p className="text-xs text-muted-foreground">
-                    Updates as the caller speaks. Keywords like &quot;fire&quot; or &quot;not breathing&quot; trigger suggestions.
+                    Updates as the caller speaks. The LLM analyzes each response to suggest units.
                   </p>
                 ) : (
-                  <div className="space-y-2">
+                  <div className={cn("space-y-2", isAssessingDispatch && "opacity-90")}>
+                    {isAssessingDispatch && (
+                      <p className="text-xs text-primary/80 font-medium">Updating with latest…</p>
+                    )}
+                    {dispatchRecommendation.stage && (
+                      <p className="text-xs font-medium text-muted-foreground capitalize">
+                        {dispatchRecommendation.stage === "preliminary" && "Preliminary — gathering info"}
+                        {dispatchRecommendation.stage === "confirming" && "Confirming — more context"}
+                        {dispatchRecommendation.stage === "confirmed" && "Confirmed"}
+                      </p>
+                    )}
+                    {dispatchRecommendation.latestTrigger && dispatchRecommendation.latestTrigger.length > 0 && (
+                      <div className="rounded-md bg-primary/10 border border-primary/20 p-1.5">
+                        <p className="text-xs font-medium text-primary mb-0.5">Just in:</p>
+                        <ul className="text-xs text-muted-foreground space-y-0.5">
+                          {dispatchRecommendation.latestTrigger.map((t, i) => (
+                            <li key={i}>{t.rationale}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                     {dispatchRecommendation.suggestedCount != null && (
                       <p className="text-xs font-medium text-foreground">
                         Suggest sending{" "}
@@ -1056,6 +1069,17 @@ export default function LiveSimulationPage({
                 )}
               </CardContent>
             </Card>
+              </div>
+
+              {/* Right: Operator notes */}
+              <Card className="flex min-h-[200px] min-w-0 flex-1 flex-col border bg-card overflow-hidden lg:min-h-0">
+                <NotesPanel
+                  callSeconds={callSeconds}
+                  notes={notes}
+                  onAddNote={(entry) => setNotes((prev) => [...prev, entry])}
+                />
+              </Card>
+            </div>
           </div>
         </div>
       </div>

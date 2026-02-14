@@ -9,6 +9,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { spawnSync } from "child_process";
 import { pointAtDistanceM, haversineMeters } from "../utils/geo.js";
+import { getOfficerForUnit } from "../utils/officerNames.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, "..", "..", "data");
@@ -65,8 +66,10 @@ function spawnVehicles(g) {
       const edge = edges[edgeIdx];
       const t = Math.random();
       const towardEnd = Math.random() < 0.5;
+      const id = `${type}-${i + 1}`;
+      const { name: officerInCharge, status } = getOfficerForUnit(id);
       list.push({
-        id: `${type}-${i + 1}`,
+        id,
         type,
         currentEdge: edgeIdx,
         t,
@@ -74,6 +77,8 @@ function spawnVehicles(g) {
         targetNode: towardEnd ? edge.toNodeIdx : edge.fromNodeIdx,
         speedMetersPerSecond: randomSpeed(type),
         pauseRemainingSeconds: 0,
+        officerInCharge,
+        status,
       });
     }
   }
@@ -210,7 +215,8 @@ function toMapPoint(v, [lat, lng]) {
     lat,
     lng,
     unitId: v.id,
-    status: "en route",
+    officerInCharge: v.officerInCharge,
+    status: v.status,
   };
 }
 

@@ -6,14 +6,6 @@ const API_BASE =
     ? process.env.NEXT_PUBLIC_API_URL
     : "http://localhost:3001"
 
-/** WebSocket URL for live call evaluation (same host/port as API, path /live-eval). */
-export function getLiveEvalWsUrl(): string {
-  const base = typeof process !== "undefined" && process.env?.NEXT_PUBLIC_API_URL
-    ? process.env.NEXT_PUBLIC_API_URL
-    : "http://localhost:3001"
-  return base.replace(/^http/, "ws") + "/live-eval"
-}
-
 export interface GenerateCallAudioResponse {
   audioUrl: string
   transcript: string
@@ -270,6 +262,10 @@ export interface AssessCallTranscriptResponse {
   critical?: boolean
   /** Suggested number of units when inferred from transcript (e.g. "two people down" -> 2). */
   suggestedCount?: number
+  /** preliminary | confirming | confirmed — so UI can show evolving confidence. */
+  stage?: "preliminary" | "confirming" | "confirmed"
+  /** Rationales that matched on the latest segment only (changes every response). */
+  latestTrigger?: { rationale: string; severity: string }[]
 }
 
 /**

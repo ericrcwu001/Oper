@@ -15,7 +15,8 @@ export interface MapPointResourcePopup {
   location?: string
   officerInCharge?: string
   unitId?: string
-  status?: string
+  /** true = en route, false = idle/roaming */
+  status?: boolean
 }
 
 /** Single point on the SF map. Position is lat/lng; parent updates for movement. */
@@ -36,7 +37,8 @@ export interface MapPoint {
   // Resource popup fields
   officerInCharge?: string
   unitId?: string
-  status?: string
+  /** true = en route, false = idle/roaming */
+  status?: boolean
   /** Optional scale for circle radius (e.g. 1.5 for pop-in effect). */
   radiusScale?: number
 }
