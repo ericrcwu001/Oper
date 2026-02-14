@@ -20,8 +20,10 @@ export const config = {
   /** ElevenLabs API key and voice – used for text-to-speech (caller audio). */
   elevenlabs: {
     apiKey: process.env.ELEVENLABS_API_KEY || '',
-    // Default voice ID; swap for a different caller voice from ElevenLabs dashboard.
+    // Default voice ID (used when caller is male or unknown).
     voiceId: process.env.ELEVENLABS_VOICE_ID || 'JBFqnCBsd6RMkjVDRZzb',
+    // Optional: voice for female callers. Set ELEVENLABS_VOICE_ID_FEMALE to enable.
+    voiceIdFemale: process.env.ELEVENLABS_VOICE_ID_FEMALE || 'EXAVITQu4vr4xnSDxMaL',
     modelId: process.env.ELEVENLABS_MODEL_ID || 'eleven_multilingual_v2',
     outputFormat: 'mp3_44100_128',
   },

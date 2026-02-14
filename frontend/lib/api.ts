@@ -17,11 +17,13 @@ export interface InteractResponse {
   conversationHistory: { role: "caller" | "operator"; content: string }[]
 }
 
+import type { ScenarioPayload } from "@/lib/types"
+
 /**
  * Generate initial caller audio for a scenario (POST /generate-call-audio).
  */
 export async function generateCallAudio(
-  scenario: string
+  scenario: ScenarioPayload
 ): Promise<GenerateCallAudioResponse> {
   const res = await fetch(`${API_BASE}/generate-call-audio`, {
     method: "POST",
@@ -41,7 +43,7 @@ export async function generateCallAudio(
  * Send operator message (text) and get next caller audio (POST /interact).
  */
 export async function interact(
-  scenario: string,
+  scenario: ScenarioPayload,
   userInput: string,
   conversationHistory: { role: "caller" | "operator"; content: string }[]
 ): Promise<InteractResponse> {
@@ -68,7 +70,7 @@ export async function interact(
  * Backend uses Whisper to transcribe, then GPT + ElevenLabs for the reply.
  */
 export async function interactWithVoice(
-  scenario: string,
+  scenario: ScenarioPayload,
   userInputAudioBase64: string,
   conversationHistory: { role: "caller" | "operator"; content: string }[]
 ): Promise<InteractResponse> {
