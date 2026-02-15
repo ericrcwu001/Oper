@@ -73,6 +73,24 @@ export type CallScenarioInput =
  * Generate a new scenario from the backend (POST /api/scenarios/generate).
  */
 /**
+ * Fetch SF roads GeoJSON (GET /api/roads). For map overlay.
+ */
+export async function fetchRoads(): Promise<GeoJSON.FeatureCollection> {
+  const res = await fetch(`${API_BASE}/api/roads`)
+  if (!res.ok) throw new Error("Failed to fetch roads")
+  return res.json()
+}
+
+/**
+ * Fetch SF roads graph as GeoJSON (GET /api/roads/graph). For map overlay.
+ */
+export async function fetchRoadsGraph(): Promise<GeoJSON.FeatureCollection> {
+  const res = await fetch(`${API_BASE}/api/roads/graph`)
+  if (!res.ok) throw new Error("Failed to fetch roads graph")
+  return res.json()
+}
+
+/**
  * Fetch current simulated vehicle positions (GET /api/vehicles).
  * Returns MapPoint-compatible array; empty if simulation not running or unavailable.
  */

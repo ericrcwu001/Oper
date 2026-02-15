@@ -10,6 +10,7 @@ import vehiclesRouter from './routes/vehicles.js';
 import { startSimulation } from './services/vehicleSimulation.js';
 import callEvaluationRouter from './routes/callEvaluation.js';
 import crimesRouter from './routes/crimes.js';
+import roadsRouter from './routes/roads.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -42,6 +43,9 @@ app.use('/api/call-evaluation', callEvaluationRouter);
 
 // SF crimes from CSV: time-windowed for map simulation (3x speed)
 app.use('/api/crimes', crimesRouter);
+
+// SF roads and road graph (GeoJSON) for map overlay
+app.use('/api/roads', roadsRouter);
 
 const server = http.createServer(app);
 

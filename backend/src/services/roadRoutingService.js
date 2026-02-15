@@ -25,16 +25,16 @@ function loadGraph() {
 }
 
 /**
- * Find the graph node index nearest to the given (lat, lng) point.
- * @param {{ lat: number, lng: number }} point
- * @returns {number | null} Node index or null if no graph
+ * Find the graph node index nearest to the given (lat, lng) point on a graph.
+ * @param {{ nodes: [number, number][] }} g - Graph with nodes array
+ * @param {{ lat: number, lng: number } | [number, number]} point - [lat, lng] or { lat, lng }
+ * @returns {number | null} Node index or null if no nodes
  */
-function nearestNode(point) {
-  const g = loadGraph();
-  if (!g || !g.nodes?.length) return null;
+export function nearestNodeOnGraph(g, point) {
+  if (!g?.nodes?.length) return null;
+  const target = Array.isArray(point) ? point : [point.lat, point.lng];
   let bestIdx = 0;
   let bestDist = Infinity;
-  const target = [point.lat, point.lng];
   for (let i = 0; i < g.nodes.length; i++) {
     const d = haversineMeters(g.nodes[i], target);
     if (d < bestDist) {
@@ -46,13 +46,23 @@ function nearestNode(point) {
 }
 
 /**
- * A* pathfinding from startNode to goalNode.
+ * Find the graph node index nearest to the given (lat, lng) point.
+ * @param {{ lat: number, lng: number }} point
+ * @returns {number | null} Node index or null if no graph
+ */
+function nearestNode(point) {
+  const g = loadGraph();
+  return g ? nearestNodeOnGraph(g, point) : null;
+}
+
+/**
+ * A* pathfinding on a given graph from startNode to goalNode.
+ * @param {{ nodes: [number, number][], edges: { fromNodeIdx: number, toNodeIdx: number, lengthM: number }[], adjacency: number[][] }} g - Graph
  * @param {number} startNodeIdx
  * @param {number} goalNodeIdx
  * @returns {{ edgeIndices: number[], distanceM: number } | null}
  */
-function astar(startNodeIdx, goalNodeIdx) {
-  const g = loadGraph();
+export function astarOnGraph(g, startNodeIdx, goalNodeIdx) {
   if (!g) return null;
   const { nodes, edges, adjacency } = g;
   const goalPos = nodes[goalNodeIdx];
@@ -89,6 +99,17 @@ function astar(startNodeIdx, goalNodeIdx) {
     }
   }
   return null;
+}
+
+/**
+ * A* pathfinding from startNode to goalNode (uses loaded graph).
+ * @param {number} startNodeIdx
+ * @param {number} goalNodeIdx
+ * @returns {{ edgeIndices: number[], distanceM: number } | null}
+ */
+function astar(startNodeIdx, goalNodeIdx) {
+  const g = loadGraph();
+  return g ? astarOnGraph(g, startNodeIdx, goalNodeIdx) : null;
 }
 
 /**

@@ -10,6 +10,7 @@ import { fileURLToPath } from "url";
 import { spawnSync } from "child_process";
 import { pointAtDistanceM, haversineMeters } from "../utils/geo.js";
 import { getOfficerForUnit } from "../utils/officerNames.js";
+import { astarOnGraph, nearestNodeOnGraph } from "./roadRoutingService.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, "..", "..", "data");
@@ -135,6 +136,45 @@ function pickNextEdge(g, v) {
   }
 
   const crimePos = [nearestCrime.lat, nearestCrime.lng];
+  const goalNodeIdx = nearestNodeOnGraph(g, crimePos);
+  if (goalNodeIdx === null) {
+    v.status = 0;
+    const nextEdgeIdx = incident[Math.floor(Math.random() * incident.length)];
+    const nextEdge = edges[nextEdgeIdx];
+    const fromNext = nextEdge.fromNodeIdx === atNode;
+    v.currentEdge = nextEdgeIdx;
+    v.targetNode = fromNext ? nextEdge.toNodeIdx : nextEdge.fromNodeIdx;
+    v.towardEnd = fromNext;
+    v.t = fromNext ? 0 : 1;
+    return;
+  }
+
+  if (goalNodeIdx === atNode) {
+    v.status = 1;
+    const nextEdgeIdx = incident[Math.floor(Math.random() * incident.length)];
+    const nextEdge = edges[nextEdgeIdx];
+    const fromNext = nextEdge.fromNodeIdx === atNode;
+    v.currentEdge = nextEdgeIdx;
+    v.targetNode = fromNext ? nextEdge.toNodeIdx : nextEdge.fromNodeIdx;
+    v.towardEnd = fromNext;
+    v.t = fromNext ? 0 : 1;
+    return;
+  }
+
+  const path = astarOnGraph(g, atNode, goalNodeIdx);
+  if (path && path.edgeIndices.length > 0) {
+    v.status = 1;
+    const bestEdgeIdx = path.edgeIndices[0];
+    const nextEdge = edges[bestEdgeIdx];
+    const fromNext = nextEdge.fromNodeIdx === atNode;
+    v.currentEdge = bestEdgeIdx;
+    v.targetNode = fromNext ? nextEdge.toNodeIdx : nextEdge.fromNodeIdx;
+    v.towardEnd = fromNext;
+    v.t = fromNext ? 0 : 1;
+    return;
+  }
+
+  // Fallback: disconnected component or no path — use greedy (closest neighbor to crime)
   let bestEdgeIdx = incident[0];
   let bestDist = Infinity;
   for (const ei of incident) {
@@ -148,7 +188,7 @@ function pickNextEdge(g, v) {
       bestEdgeIdx = ei;
     }
   }
-  v.status = 1; // en route to crime
+  v.status = 1;
   const nextEdge = edges[bestEdgeIdx];
   const fromNext = nextEdge.fromNodeIdx === atNode;
   v.currentEdge = bestEdgeIdx;
