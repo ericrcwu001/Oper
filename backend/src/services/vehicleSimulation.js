@@ -15,6 +15,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, "..", "..", "data");
 const ROADS_PATH = path.join(DATA_DIR, "sf-roads.json");
 const GRAPH_PATH = path.join(DATA_DIR, "sf-roads-graph.json");
+const VEHICLE_POSITIONS_PATH = path.join(DATA_DIR, "vehicle-positions.json");
 
 const COUNTS = { fire: 25, police: 180, ambulance: 12 };
 const SPEED_BASE = { fire: 13, police: 11, ambulance: 13 };
@@ -27,11 +28,13 @@ const PAUSE_MAX_SECONDS = 2.5;
 const MIN_NODE_DEGREE_FOR_PAUSE = 2; // nodes with 2+ incident edges (intersections / segment joins)
 /** When a vehicle is within this distance (m) of a crime, it steers toward the nearest crime at the next node. Larger = more visible flow toward crime areas. */
 const ATTRACTION_RADIUS_M = 1500;
+const WRITE_INTERVAL_MS = 1000;
 
 let graph = null;
 let vehicles = [];
 let positions = [];
 let intervalId = null;
+let tickCount = 0;
 /** Active crime locations { lat, lng }[] from frontend (POST /api/simulation/crimes). */
 let activeCrimes = [];
 
@@ -220,9 +223,20 @@ function toMapPoint(v, [lat, lng]) {
   };
 }
 
+const TICKS_PER_WRITE = Math.round(WRITE_INTERVAL_MS / 1000 / DT_SECONDS);
+
 function tick() {
   for (const v of vehicles) advanceVehicle(graph, v);
   positions = vehicles.map((v) => toMapPoint(v, positionOf(graph, v)));
+  tickCount++;
+  if (tickCount >= TICKS_PER_WRITE) {
+    tickCount = 0;
+    try {
+      fs.writeFileSync(VEHICLE_POSITIONS_PATH, JSON.stringify(positions), "utf8");
+    } catch (err) {
+      // ignore write errors (e.g. read-only fs)
+    }
+  }
 }
 
 /**
@@ -239,8 +253,13 @@ export function startSimulation() {
   }
   vehicles = spawnVehicles(graph);
   tick();
+  try {
+    fs.writeFileSync(VEHICLE_POSITIONS_PATH, JSON.stringify(positions), "utf8");
+  } catch (err) {
+    // ignore
+  }
   intervalId = setInterval(tick, DT_SECONDS * 1000);
-  console.log(`Vehicle simulation: ${vehicles.length} vehicles running`);
+  console.log(`Vehicle simulation: ${vehicles.length} vehicles running, writing to ${VEHICLE_POSITIONS_PATH} every ${WRITE_INTERVAL_MS}ms`);
 }
 
 /**

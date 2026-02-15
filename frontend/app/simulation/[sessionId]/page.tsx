@@ -893,7 +893,7 @@ export default function LiveSimulationPage({
                     Ambulance
                   </span>
                   <span className="flex items-center gap-1.5">
-                    <span className="h-2.5 w-2.5 rounded-full border border-border bg-[#FFFFFF]" aria-hidden />
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#FCD34D]" aria-hidden />
                     Crime
                   </span>
                   {crimesDate && (

@@ -77,8 +77,8 @@ export const MAP_POINT_911_BEACON_FOOTPRINT = 0.00022
 /** Crime beacon extrusion height in meters (smaller pillars in 3D). */
 export const MAP_POINT_CRIME_BEACON_HEIGHT_M = 500
 
-/** Crime beacon color (light gray for visibility in 3D). */
-export const MAP_POINT_CRIME_BEACON_COLOR = "#E5E7EB"
+/** Crime beacon color (yellow to match crime points). */
+export const MAP_POINT_CRIME_BEACON_COLOR = "#FCD34D"
 
 /** Crime beacon footprint half-side in degrees (smaller than 911). */
 export const MAP_POINT_CRIME_BEACON_FOOTPRINT = 0.00012
