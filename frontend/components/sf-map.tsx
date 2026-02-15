@@ -23,6 +23,8 @@ import {
   MAP_POINT_CRIME_BEACON_FOOTPRINT,
   MAP_POINT_911_STROKE_COLOR,
   CRIME_POINT_STROKE_COLOR,
+  MAP_POINT_RECOMMENDED_STROKE_COLOR,
+  MAP_POINT_RECOMMENDED_RING_RADIUS_BY_ZOOM,
 } from "@/lib/map-constants"
 import { getSFMapStyle } from "@/lib/map-style"
 
@@ -47,6 +49,7 @@ function pointsToGeoJSON(points: MapPoint[]): GeoJSON.FeatureCollection {
         selected: p.selected ?? false,
         disabled: p.disabled ?? false,
         radiusScale: p.radiusScale ?? 1,
+        recommended: p.recommended ?? false,
       },
     })),
   }
@@ -107,6 +110,7 @@ const POINTS_LAYER_SELECTED_ID = "map-points-circles-selected"
 const POINTS_LAYER_SELECTED_UNIT_ID = "map-points-circles-selected-unit"
 const POINTS_LAYER_911_ID = "map-points-circles-911"
 const POINTS_LAYER_SELECTED_911_ID = "map-points-circles-selected-911"
+const POINTS_LAYER_RECOMMENDED_ID = "map-points-circles-recommended"
 const POINTS_911_BEACONS_SOURCE_ID = "map-points-911-beacons"
 const POINTS_911_BEACON_LAYER_ID = "map-points-911-beacon-extrusion"
 const POINTS_CRIME_BEACONS_SOURCE_ID = "map-points-crime-beacons"
@@ -144,6 +148,10 @@ export function SFMap({
   const pointsRef = useRef<MapPoint[]>(points)
   const selectedPointIdRef = useRef<string | null>(selectedPointId)
   const [pointsLayerReady, setPointsLayerReady] = useState(false)
+  const [pointsVersion, setPointsVersion] = useState(0)
+  if (pointsRef.current !== points) {
+    setPointsVersion((v) => v + 1)
+  }
   pointsRef.current = points
   selectedPointIdRef.current = selectedPointId
 
@@ -323,6 +331,27 @@ export function SFMap({
         } as CirclePaint,
       })
 
+      // Recommended (closest available) units: highlight ring on top of units
+      const flatRecommendedRadius = MAP_POINT_RECOMMENDED_RING_RADIUS_BY_ZOOM.flat()
+      const filterRecommendedUnit = [
+        "all",
+        FILTER_UNIT,
+        ["get", "recommended"],
+      ] as maplibregl.FilterSpecification
+      map.addLayer({
+        id: POINTS_LAYER_RECOMMENDED_ID,
+        type: "circle",
+        source: POINTS_SOURCE_ID,
+        filter: filterRecommendedUnit,
+        paint: {
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatRecommendedRadius],
+          "circle-color": "rgba(0,0,0,0)",
+          "circle-stroke-width": 3,
+          "circle-stroke-color": MAP_POINT_RECOMMENDED_STROKE_COLOR,
+          "circle-opacity": 1,
+        } as CirclePaint,
+      })
+
       setPointsLayerReady(true)
 
       // 911 vertical beacon (fill-extrusion, visible in 3D/tilted view); skip if unsupported
@@ -378,7 +407,8 @@ export function SFMap({
     }
   }, [])
 
-  // Sync points and selected state to GeoJSON source; sync 911 and crime beacon polygons
+  // Sync points and selected state to GeoJSON source; sync 911 and crime beacon polygons.
+  // Dependencies are fixed-length (pointsVersion, selectedPointId) to satisfy React's constant dependency array size.
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
@@ -386,17 +416,19 @@ export function SFMap({
     const source = map.getSource(POINTS_SOURCE_ID) as maplibregl.GeoJSONSource
     if (!source) return
 
-    const withSelection = points.map((p) => ({
+    const pts = pointsRef.current
+    const selId = selectedPointIdRef.current
+    const withSelection = pts.map((p) => ({
       ...p,
-      selected: p.id === selectedPointId,
+      selected: p.id === selId,
     }))
     source.setData(pointsToGeoJSON(withSelection))
 
     const beaconSource = map.getSource(POINTS_911_BEACONS_SOURCE_ID) as maplibregl.GeoJSONSource
-    if (beaconSource) beaconSource.setData(points911ToBeaconGeoJSON(points))
+    if (beaconSource) beaconSource.setData(points911ToBeaconGeoJSON(pts))
     const crimeBeaconSource = map.getSource(POINTS_CRIME_BEACONS_SOURCE_ID) as maplibregl.GeoJSONSource
-    if (crimeBeaconSource) crimeBeaconSource.setData(pointsCrimeToBeaconGeoJSON(points))
-  }, [points, selectedPointId])
+    if (crimeBeaconSource) crimeBeaconSource.setData(pointsCrimeToBeaconGeoJSON(pts))
+  }, [pointsVersion, selectedPointId])
 
   const showPopup = useCallback(
     (point: MapPoint, lngLat: [number, number]) => {
@@ -507,7 +539,8 @@ export function SFMap({
 
       onSelectPoint(id)
 
-      const point = points.find((p) => p.id === id)
+      const pts = pointsRef.current
+      const point = pts.find((p) => p.id === id)
       if (point) showPopup(point, [point.lng, point.lat])
     }
 
@@ -515,7 +548,7 @@ export function SFMap({
     return () => {
       map.off("click", handleClick)
     }
-  }, [pointsLayerReady, points, onSelectPoint, showPopup])
+  }, [pointsLayerReady, pointsVersion, onSelectPoint, showPopup])
 
   // Cursor on hover (only after points layer exists)
   useEffect(() => {

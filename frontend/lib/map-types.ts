@@ -41,4 +41,6 @@ export interface MapPoint {
   status?: boolean
   /** Optional scale for circle radius (e.g. 1.5 for pop-in effect). */
   radiusScale?: number
+  /** True when this unit is among the closest available (resource allocation); show highlight on map. */
+  recommended?: boolean
 }

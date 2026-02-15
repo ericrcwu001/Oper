@@ -34,6 +34,7 @@ import {
   interact,
   interactWithVoice,
   assessCallTranscript,
+  fetchClosestVehicles,
   fetchCrimesDay,
   fetchVehicles,
   postCrimesForSteering,
@@ -317,8 +318,12 @@ export default function LiveSimulationPage({
     suggestedCount?: number
     stage?: "preliminary" | "confirming" | "confirmed"
     latestTrigger?: { rationale: string; severity: string }[]
+    resourceContextUsed?: string
+    closestVehicleIds?: string[]
   } | null>(null)
   const [isAssessingDispatch, setIsAssessingDispatch] = useState(false)
+  /** Closest-available vehicle IDs for map highlight; updated by assess + polling so highlights stay live. */
+  const [highlightedVehicleIds, setHighlightedVehicleIds] = useState<string[]>([])
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const tick30Ref = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -368,6 +373,12 @@ export default function LiveSimulationPage({
       }))
   }, [crimesFromApi, crimeSimSeconds, crimeResolvedIds, crimePopScales])
   crimePointsRef.current = crimeMapPoints
+
+  // Mark closest-available (recommended) vehicles for map highlight; source: assess response + polling
+  const mapPointsWithRecommended = useMemo(() => {
+    const ids = new Set(highlightedVehicleIds)
+    return mapPoints.map((p) => ({ ...p, recommended: ids.has(p.id) }))
+  }, [mapPoints, highlightedVehicleIds])
 
   // When new crimes appear, set pop scale for pop-in effect
   useEffect(() => {
@@ -545,12 +556,15 @@ export default function LiveSimulationPage({
       setIsAssessingDispatch(false)
       return
     }
+    const incidentLocation =
+      scenarioCallLocation ?? { lat: DEFAULT_911_POINT.lat, lng: DEFAULT_911_POINT.lng }
     let cancelled = false
     setIsAssessingDispatch(true)
-    assessCallTranscript(callerTranscript)
+    assessCallTranscript(callerTranscript, { incidentLocation })
       .then((res) => {
         if (!cancelled) {
           setDispatchRecommendation(res)
+          setHighlightedVehicleIds(res.closestVehicleIds ?? [])
           setIsAssessingDispatch(false)
         }
       })
@@ -561,7 +575,28 @@ export default function LiveSimulationPage({
         }
       })
     return () => { cancelled = true }
-  }, [callActive, conversationHistory])
+  }, [callActive, conversationHistory, scenarioCallLocation])
+
+  // Poll closest-available vehicles every 2s while call is active so map highlight updates as positions/availability change
+  useEffect(() => {
+    if (!callActive) {
+      setHighlightedVehicleIds([])
+      return
+    }
+    const incidentLocation =
+      scenarioCallLocation ?? { lat: DEFAULT_911_POINT.lat, lng: DEFAULT_911_POINT.lng }
+    const poll = async () => {
+      try {
+        const res = await fetchClosestVehicles(incidentLocation)
+        setHighlightedVehicleIds(res.closestVehicleIds)
+      } catch {
+        // Keep previous highlights on error
+      }
+    }
+    poll()
+    const interval = setInterval(poll, 2000)
+    return () => clearInterval(interval)
+  }, [callActive, scenarioCallLocation])
 
   // Hint system
   const hintActions =
@@ -634,6 +669,7 @@ export default function LiveSimulationPage({
     setCallerAudioUrl(null)
     setConversationHistory([])
     setDispatchRecommendation(null)
+    setHighlightedVehicleIds([])
     try {
       sessionStorage.setItem(
         `simulation-transcript-${sessionId}`,
@@ -913,7 +949,7 @@ export default function LiveSimulationPage({
             <Card className="flex min-h-0 flex-1 flex-col overflow-hidden border bg-card">
               <div className="relative min-h-0 flex-1 w-full">
                 <SFMap
-                  points={mapPoints}
+                  points={mapPointsWithRecommended}
                   selectedPointId={selectedPointId}
                   onSelectPoint={setSelectedPointId}
                   className="absolute inset-0 h-full w-full"
@@ -938,6 +974,10 @@ export default function LiveSimulationPage({
                   <span className="flex items-center gap-1.5">
                     <span className="h-2.5 w-2.5 rounded-full bg-[#FCD34D]" aria-hidden />
                     Crime
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2.5 w-2.5 rounded-full border-2 border-[#22C55E] bg-transparent" aria-hidden />
+                    Closest available
                   </span>
                   {crimesDate && (
                     <span className="text-muted-foreground">Day: {crimesDate} ({CRIME_SIM_CLOCK_SPEEDUP}×)</span>

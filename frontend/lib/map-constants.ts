@@ -100,6 +100,16 @@ export const MAP_POINT_CRIME_BEACON_COLOR = "#FCD34D"
 /** Crime beacon footprint half-side in degrees (smaller than 911). */
 export const MAP_POINT_CRIME_BEACON_FOOTPRINT = 0.00012
 
+/** Stroke for "recommended" (closest available) unit highlight ring on the map. */
+export const MAP_POINT_RECOMMENDED_STROKE_COLOR = "#22C55E"
+
+/** Zoom → radius (px) for the recommended-unit ring (slightly larger than unit circle). */
+export const MAP_POINT_RECOMMENDED_RING_RADIUS_BY_ZOOM: [number, number][] = [
+  [11, 3.5],
+  [14, 6],
+  [16, 8.5],
+]
+
 /**
  * PMTiles URL for vector basemap. Prefer local copy at /tiles/sf.pmtiles (see frontend/public/tiles/).
  * Fallback: build channel (see frontend/docs/PROTOMAPS_SETUP.md). For production, host your own copy.
