@@ -110,6 +110,12 @@ export const MAP_POINT_RECOMMENDED_RING_RADIUS_BY_ZOOM: [number, number][] = [
   [16, 8.5],
 ]
 
+/** Min zoom for inline labels: 911 and crime show earlier (more important). */
+export const MAP_LABEL_ZOOM_911 = 13
+export const MAP_LABEL_ZOOM_CRIME = 13
+/** Units require more zoom to reduce clutter. */
+export const MAP_LABEL_ZOOM_UNITS = 15
+
 /**
  * PMTiles URL for vector basemap. Prefer local copy at /tiles/sf.pmtiles (see frontend/public/tiles/).
  * Fallback: build channel (see frontend/docs/PROTOMAPS_SETUP.md). For production, host your own copy.

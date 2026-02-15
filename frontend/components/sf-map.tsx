@@ -24,6 +24,9 @@ import {
   CRIME_POINT_STROKE_COLOR,
   MAP_POINT_RECOMMENDED_STROKE_COLOR,
   MAP_POINT_RECOMMENDED_RING_RADIUS_BY_ZOOM,
+  MAP_LABEL_ZOOM_911,
+  MAP_LABEL_ZOOM_CRIME,
+  MAP_LABEL_ZOOM_UNITS,
 } from "@/lib/map-constants"
 import { getSFMapStyle } from "@/lib/map-style"
 
@@ -50,6 +53,65 @@ function pointsToGeoJSON(points: MapPoint[]): GeoJSON.FeatureCollection {
         radiusScale: p.radiusScale ?? 1,
         recommended: p.recommended ?? false,
         status: p.status === 1 || p.status === true,
+      },
+    })),
+  }
+}
+
+/** Same fields as popup, formatted as plain multi-line text for inline labels. */
+function getPointLabelText(point: MapPoint): string {
+  const coords = `(${point.lng.toFixed(4)}, ${point.lat.toFixed(4)})`
+  const is911 = point.type === "911"
+  const isCrime = point.type === "crime"
+  const fields: { label: string; value?: string }[] = is911
+    ? [
+        { label: "Location", value: point.location },
+        { label: "Description", value: point.description },
+        { label: "Caller ID", value: point.callerId },
+        { label: "Caller name", value: point.callerName },
+        { label: "Time received", value: point.timestamp },
+      ]
+    : isCrime
+      ? [
+          { label: "Category", value: point.location },
+          { label: "Address", value: point.description },
+          { label: "Details", value: point.callerId },
+        ]
+      : [
+          { label: "Location", value: point.location },
+          { label: "Officer in charge", value: point.officerInCharge },
+          { label: "Unit ID", value: point.unitId },
+          {
+            label: "Status",
+            value:
+              typeof point.status === "string"
+                ? point.status
+                : point.status === true
+                  ? "En route"
+                  : point.status === false
+                    ? "Idle"
+                    : "Unknown",
+          },
+        ]
+  const fieldLines = fields
+    .filter((f) => f.value != null && f.value !== "")
+    .map((f) => `[${f.value}]`)
+    .join("\n")
+  return fieldLines ? `[${coords}]\n${fieldLines}` : `[${coords}]`
+}
+
+/** GeoJSON for label symbol layers: Point features with id, type, and text. */
+function pointsToLabelsGeoJSON(points: MapPoint[]): GeoJSON.FeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: points.map((p) => ({
+      type: "Feature" as const,
+      id: p.id,
+      geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] },
+      properties: {
+        id: p.id,
+        type: p.type,
+        text: getPointLabelText(p),
       },
     })),
   }
@@ -201,6 +263,11 @@ const POINTS_911_BEACONS_SOURCE_ID = "map-points-911-beacons"
 const POINTS_911_BEACON_LAYER_ID = "map-points-911-beacon-extrusion"
 const POINTS_CRIME_BEACONS_SOURCE_ID = "map-points-crime-beacons"
 const POINTS_CRIME_BEACON_LAYER_ID = "map-points-crime-beacon-extrusion"
+
+const POINTS_LABELS_SOURCE_ID = "map-points-labels"
+const POINTS_LABELS_LAYER_911_ID = "map-points-labels-911"
+const POINTS_LABELS_LAYER_CRIME_ID = "map-points-labels-crime"
+const POINTS_LABELS_LAYER_UNITS_ID = "map-points-labels-units"
 
 const POINTS_ELLIPSE_SOURCE_ID = "map-points-ellipses"
 const POINTS_ELLIPSE_LAYER_ID = "map-points-ellipses-fill"
@@ -607,6 +674,49 @@ export function SFMap({
       } catch {
         // fill-extrusion may be unsupported
       }
+
+      // Inline labels: appear when zoomed in; 911/crime at lower zoom than units
+      map.addSource(POINTS_LABELS_SOURCE_ID, {
+        type: "geojson",
+        data: pointsToLabelsGeoJSON(pointsRef.current ?? []),
+        promoteId: "id",
+      })
+      const labelLayerBase = {
+        type: "symbol" as const,
+        source: POINTS_LABELS_SOURCE_ID,
+        layout: {
+          "text-field": ["get", "text"],
+          "text-anchor": "left",
+          "text-offset": [0.8, 0],
+          "text-size": 10,
+          "text-font": ["Roboto Regular"],
+          "text-allow-overlap": true,
+          "text-ignore-placement": true,
+        },
+        paint: {
+          "text-color": "#E5E7EB",
+          "text-halo-color": "#0B0C0E",
+          "text-halo-width": 2,
+        },
+      }
+      map.addLayer({
+        ...labelLayerBase,
+        id: POINTS_LABELS_LAYER_911_ID,
+        filter: FILTER_911,
+        minzoom: MAP_LABEL_ZOOM_911,
+      } as maplibregl.SymbolLayerSpecification)
+      map.addLayer({
+        ...labelLayerBase,
+        id: POINTS_LABELS_LAYER_CRIME_ID,
+        filter: FILTER_CRIME,
+        minzoom: MAP_LABEL_ZOOM_CRIME,
+      } as maplibregl.SymbolLayerSpecification)
+      map.addLayer({
+        ...labelLayerBase,
+        id: POINTS_LABELS_LAYER_UNITS_ID,
+        filter: FILTER_UNIT,
+        minzoom: MAP_LABEL_ZOOM_UNITS,
+      } as maplibregl.SymbolLayerSpecification)
     }
 
     if (map.isStyleLoaded()) addPointsLayer()
@@ -648,6 +758,8 @@ export function SFMap({
       const ellipseSource = map.getSource(POINTS_ELLIPSE_SOURCE_ID) as maplibregl.GeoJSONSource
       if (ellipseSource) ellipseSource.setData(pointsToEllipseGeoJSON(pts, zoom, pitchRef.current, selId))
     }
+    const labelsSource = map.getSource(POINTS_LABELS_SOURCE_ID) as maplibregl.GeoJSONSource
+    if (labelsSource) labelsSource.setData(pointsToLabelsGeoJSON(points))
   }, [pointsVersion, selectedPointId])
 
   // Refresh beacon footprint when zoom or center changes so it matches circle radius
