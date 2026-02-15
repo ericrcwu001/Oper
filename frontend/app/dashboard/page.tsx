@@ -45,14 +45,21 @@ function writeSessionsCache(sessions: Session[]) {
 
 export default function DashboardPage() {
   const { setNewCallModalOpen, activeCall } = useSidebarTabs()
-  const [sessions, setSessions] = useState<Session[]>(() => readSessionsCache() ?? [])
-  const [sessionsLoading, setSessionsLoading] = useState(() => readSessionsCache() === null)
+  // Initialize with empty array so server and client render the same (avoids hydration mismatch).
+  // Cache is applied in useEffect after mount.
+  const [sessions, setSessions] = useState<Session[]>([])
+  const [sessionsLoading, setSessionsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [selectedSession, setSelectedSession] = useState<Session | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
 
   useEffect(() => {
     setLoadError(null)
+    const cached = readSessionsCache()
+    if (cached?.length) {
+      setSessions(cached)
+      setSessionsLoading(false)
+    }
     getSimulations()
       .then(({ data, error }) => {
         setSessionsLoading(false)
