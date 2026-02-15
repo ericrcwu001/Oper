@@ -107,6 +107,17 @@ export async function getSituationPriority(transcript) {
 }
 
 /**
+ * Get situation priority and classified label (avoids duplicate classifyTranscript calls).
+ * @param {string} transcript - Full caller-side transcript
+ * @returns {Promise<{ priority: number, label: string }>} - 1–5 priority and incident label
+ */
+export async function getSituationPriorityWithLabel(transcript) {
+  const label = await classifyTranscript(transcript);
+  const priority = await getPriorityFromTranscriptLabel(label);
+  return { priority, label: (label || '').trim().toUpperCase() };
+}
+
+/**
  * Convert priority (1–5) to suggestedCount and severity for dispatch response.
  * @param {number} priority - 1–5
  * @returns {{ suggestedCount: number, severity: string, critical: boolean }}

@@ -550,6 +550,8 @@ export default function LiveSimulationPage({
   crimeResolvedIdsRef.current = crimeResolvedIds
   crimeProximitySecondsRef.current = crimeProximitySeconds
   highlightedVehicleIdsRef.current = highlightedVehicleIds
+  const hasDispatchedRef = useRef(hasDispatched)
+  hasDispatchedRef.current = hasDispatched
 
   // Simulated loading (skip delay when auto-starting from dashboard)
   useEffect(() => {
@@ -860,21 +862,23 @@ export default function LiveSimulationPage({
     return () => clearInterval(id)
   }, [])
 
-  // Poll backend vehicles every 1s; send crimes + 911 dispatch target so highlighted vehicles head toward the call.
+  // Poll backend vehicles every 1s; send crimes. Only send 911 dispatch target after operator clicks Dispatch.
   useEffect(() => {
     const POLL_MS = 1000
     const poll = async () => {
       try {
         const crimesForBackend = crimePointsRef.current.map((p) => ({ lat: p.lat, lng: p.lng }))
         const callPoint = current911PointRef.current
+        const dispatchVehicleIds = highlightedVehicleIdsRef.current
+        const shouldSteerTo911 = hasDispatchedRef.current
         const dispatchTarget =
-          callPoint?.type === "911"
+          shouldSteerTo911 && callPoint?.type === "911"
             ? { lat: callPoint.lat, lng: callPoint.lng }
             : undefined
-        const dispatchVehicleIds = highlightedVehicleIdsRef.current
         await postCrimesForSteering(crimesForBackend, {
           dispatchTarget,
-          dispatchVehicleIds: dispatchVehicleIds.length > 0 ? dispatchVehicleIds : undefined,
+          dispatchVehicleIds:
+            dispatchTarget && dispatchVehicleIds.length > 0 ? dispatchVehicleIds : undefined,
         }).catch(() => {})
         const vehicles = await fetchVehicles()
         if (vehicles.length > 0) {
@@ -1687,16 +1691,15 @@ export default function LiveSimulationPage({
                     {isAssessingDispatch && (
                       <p className="text-xs text-primary/80 font-medium">Updating with latest…</p>
                     )}
-                    {dispatchRecommendation.stage && (
+                    {dispatchRecommendation.stage && dispatchRecommendation.stage !== "confirmed" && (
                       <p className="text-xs font-medium text-muted-foreground capitalize">
                         {dispatchRecommendation.stage === "preliminary" && "Preliminary — gathering info"}
                         {dispatchRecommendation.stage === "confirming" && "Confirming — more context"}
-                        {dispatchRecommendation.stage === "confirmed" && "Confirmed"}
                       </p>
                     )}
                     {dispatchRecommendation.latestTrigger && dispatchRecommendation.latestTrigger.length > 0 && (
                       <div className="rounded-md bg-primary/10 border border-primary/20 p-1.5">
-                        <p className="text-xs font-medium text-primary mb-0.5">Just in:</p>
+                        <p className="text-xs font-medium text-primary mb-0.5">From caller:</p>
                         <ul className="text-xs text-muted-foreground space-y-0.5">
                           {dispatchRecommendation.latestTrigger.map((t, i) => (
                             <li key={i}>{t.rationale}</li>
@@ -1704,7 +1707,7 @@ export default function LiveSimulationPage({
                         </ul>
                       </div>
                     )}
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-white">
                       Severity:{" "}
                       <span
                         className={cn(
@@ -1720,7 +1723,7 @@ export default function LiveSimulationPage({
                     </p>
                     <div className="grid grid-cols-3 gap-2">
                       <label className="flex flex-col gap-1">
-                        <span className="text-xs font-medium text-muted-foreground">Police</span>
+                        <span className="text-center text-xs font-medium text-white">Police</span>
                         <Input
                           type="number"
                           min={0}
@@ -1737,7 +1740,7 @@ export default function LiveSimulationPage({
                         />
                       </label>
                       <label className="flex flex-col gap-1">
-                        <span className="text-xs font-medium text-muted-foreground">Fire</span>
+                        <span className="text-center text-xs font-medium text-white">Firetruck</span>
                         <Input
                           type="number"
                           min={0}
@@ -1754,7 +1757,7 @@ export default function LiveSimulationPage({
                         />
                       </label>
                       <label className="flex flex-col gap-1">
-                        <span className="text-xs font-medium text-muted-foreground">Medical</span>
+                        <span className="text-center text-xs font-medium text-white">Ambulance</span>
                         <Input
                           type="number"
                           min={0}
@@ -1771,7 +1774,7 @@ export default function LiveSimulationPage({
                         />
                       </label>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex w-full flex-wrap items-center gap-2">
                       {hasDispatched ? (
                         <span className="inline-flex items-center gap-1.5 rounded-md bg-primary/15 px-2 py-1 text-xs font-medium text-primary">
                           <CheckCircle2 className="h-3.5 w-3.5" />
@@ -1781,7 +1784,7 @@ export default function LiveSimulationPage({
                         <Button
                           type="button"
                           variant={dispatchMatchesRecommendation ? "default" : "outline"}
-                          className="h-7 min-h-7 gap-1 px-2 text-xs"
+                          className="h-7 min-h-7 w-full gap-1 px-2 text-xs"
                           onClick={() => setHasDispatched(true)}
                         >
                           <SendHorizontal className="h-3 w-3" />

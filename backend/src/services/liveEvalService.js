@@ -10,27 +10,57 @@ import { getSituationPriority, priorityToDispatch } from './dispatchPriorityServ
 
 const VALID_UNITS = ['EMT_BLS', 'ALS', 'Police', 'Fire', 'SWAT'];
 const VALID_SEVERITIES = ['low', 'medium', 'high', 'critical'];
+
+/**
+ * Build units array from LLM unitCounts (e.g. { Police: 5, SWAT: 1, EMT_BLS: 2, ALS: 1, Fire: 1 }).
+ * @param {Record<string, number>} unitCounts
+ * @param {Record<string, string>} rationales
+ * @param {string} defaultSeverity
+ * @returns {Array<{ unit: string, rationale?: string, severity?: string }>}
+ */
+function unitsFromCounts(unitCounts, rationales = {}, defaultSeverity = 'medium') {
+  const units = [];
+  for (const unitType of VALID_UNITS) {
+    const n = Math.min(10, Math.max(0, Math.floor(Number(unitCounts?.[unitType]) || 0)));
+    const rationale = typeof rationales?.[unitType] === 'string' ? rationales[unitType].trim() : undefined;
+    for (let i = 0; i < n; i++) {
+      units.push({ unit: unitType, rationale: rationale || undefined, severity: defaultSeverity });
+    }
+  }
+  return units;
+}
 const VALID_STAGES = ['preliminary', 'confirming', 'confirmed'];
 
 /**
  * Normalize LLM output into the exact shape the frontend expects.
+ * Prefers unitCounts (LLM-generated counts) over legacy units array.
  * @param {unknown} parsed
  * @param {string} transcript
  * @returns {{ units: Array<{ unit: string, rationale?: string, severity?: string }>, severity: string, critical?: boolean, suggestedCount?: number, stage?: string, latestTrigger?: Array<{ rationale: string, severity: string }> }}
  */
 function normalizeResponse(parsed, transcript) {
-  const units = Array.isArray(parsed.units)
-    ? parsed.units
-        .filter((u) => u && typeof u === 'object' && typeof u.unit === 'string')
-        .map((u) => ({
-          unit: VALID_UNITS.includes(u.unit) ? u.unit : VALID_UNITS[0],
-          rationale: typeof u.rationale === 'string' ? u.rationale.trim() : undefined,
-          severity: VALID_SEVERITIES.includes(u.severity) ? u.severity : 'medium',
-        }))
-    : [];
-
   const severity = VALID_SEVERITIES.includes(parsed.severity) ? parsed.severity : 'low';
   const critical = Boolean(parsed.critical);
+
+  let units;
+  if (parsed.unitCounts && typeof parsed.unitCounts === 'object') {
+    units = unitsFromCounts(parsed.unitCounts, parsed.rationales || {}, severity);
+  }
+  if (!units?.length) {
+    units = Array.isArray(parsed.units)
+      ? parsed.units
+          .filter((u) => u && typeof u === 'object' && typeof u.unit === 'string')
+          .map((u) => ({
+            unit: VALID_UNITS.includes(u.unit) ? u.unit : VALID_UNITS[0],
+            rationale: typeof u.rationale === 'string' ? u.rationale.trim() : undefined,
+            severity: VALID_SEVERITIES.includes(u.severity) ? u.severity : 'medium',
+          }))
+      : [];
+  }
+  if (!units.length) {
+    units = [{ unit: 'EMT_BLS', rationale: 'Awaiting more information.', severity: 'low' }];
+  }
+
   let suggestedCount =
     typeof parsed.suggestedCount === 'number' && Number.isInteger(parsed.suggestedCount)
       ? Math.min(10, Math.max(1, parsed.suggestedCount))
@@ -49,7 +79,7 @@ function normalizeResponse(parsed, transcript) {
   const stage = VALID_STAGES.includes(parsed.stage) ? parsed.stage : undefined;
 
   return {
-    units: units.length ? units : [{ unit: 'EMT_BLS', rationale: 'Awaiting more information.', severity: 'low' }],
+    units,
     severity,
     critical,
     ...(suggestedCount != null && { suggestedCount }),
@@ -98,29 +128,48 @@ export async function assessTranscriptWithLLM(transcript, options = {}) {
 
   const openai = new OpenAI({ apiKey: config.openai.apiKey });
 
-  const systemPrompt = `${ragContext}You are an expert 911 dispatcher. Analyze the CALLER transcript from an ongoing emergency call and recommend which units to dispatch.
+  const systemPrompt = `${ragContext}You are an expert 911 dispatcher. Analyze the CALLER transcript from an ongoing emergency call and recommend how many units of each type to dispatch.
 
-CRITICAL: Base your recommendations ONLY on what the caller has actually said in the transcript. Do NOT use any scenario context, incident location, or external information. If the caller has not yet given an address or key details, reflect that in your recommendations (e.g. preliminary stage, fewer units). Use only the reference material above (if provided) to align with 911 protocols and best practices.
+CRITICAL: Base your recommendations ONLY on what the caller has actually said. Do NOT use scenario context or external information. If details are sparse, recommend fewer units (preliminary stage).
 
 Output a JSON object only, no other text. Use this exact structure:
 {
-  "units": [
-    { "unit": "<UnitType>", "rationale": "<short reason>", "severity": "<low|medium|high|critical>" }
-  ],
+  "unitCounts": {
+    "Police": <0-10>,
+    "SWAT": <0-10>,
+    "EMT_BLS": <0-10>,
+    "ALS": <0-10>,
+    "Fire": <0-10>
+  },
+  "rationales": {
+    "Police": "<short reason for police count>",
+    "SWAT": "<short reason>",
+    "EMT_BLS": "<short reason>",
+    "ALS": "<short reason>",
+    "Fire": "<short reason>"
+  },
   "severity": "<low|medium|high|critical>",
   "critical": <true only if life-threatening or active violence>,
-  "suggestedCount": <number 1-5 if you can infer how many units, or omit>,
+  "suggestedCount": <total units, or omit>,
   "latestTrigger": [
-    { "rationale": "<what in the caller's most recent words triggered this>", "severity": "<low|medium|high|critical>" }
+    { "rationale": "<what in the caller's words triggered this>", "severity": "<low|medium|high|critical>" }
   ]
 }
 
 Rules:
-- unit must be exactly one of: EMT_BLS, ALS, Police, Fire, SWAT. Add one object per recommended unit type.
-- severity: overall severity of the incident (low, medium, high, critical).
-- critical: true only for life-threatening (e.g. not breathing, cardiac arrest) or active violence (shots fired, armed suspect).
-- suggestedCount: optional; only include if the caller indicated number of victims/patients (e.g. "two people down" -> 2).
-- latestTrigger: 0-3 items summarizing what in the caller's most recent statements (last sentence or two) drove the recommendation; use this so the UI can show "Just in" updates.`;
+- unitCounts: How many of each unit type to send. Use 911 dispatch protocols:
+  * Active shooter / mass shooting / hostage: 4-6 Police, 1-2 SWAT, 2-4 EMT_BLS, 1-2 ALS, 0-1 Fire (rescue support)
+  * Structure fire: 2-3 Fire, 1-2 EMT_BLS, 1 ALS, 1 Police (traffic/scene)
+  * Cardiac arrest / not breathing: 1-2 EMT_BLS, 1 ALS, 1 Fire (first responder with AED)
+  * Shooting / person shot: 2-4 Police, 0-1 SWAT, 1-2 EMT_BLS, 1 ALS, 0 Fire
+  * Domestic violence / assault: 2 Police, 0-1 EMT_BLS, 0-1 ALS, 0 Fire
+  * Car accident with injuries: 1 Police, 1-2 EMT_BLS, 0-1 ALS, 0 Fire
+  * Robbery / burglary: 1-2 Police, 0 medical, 0 Fire
+  * Vague or minimal info: 0-1 of relevant types
+- rationales: Brief reason per unit type (one sentence).
+- severity: overall (low, medium, high, critical).
+- critical: true for life-threatening or active violence.
+- latestTrigger: 0-3 items from caller's most recent words.`;
 
   const userPrompt = `CALLER TRANSCRIPT (operator has been speaking with this person; analyze for dispatch—use ONLY what the caller has said, no other context):\n\n${text || '(No transcript yet.)'}\n\nReturn the JSON object only.`;
 
@@ -148,14 +197,14 @@ Rules:
   const out = normalizeResponse(parsed, transcript);
   if (!out.stage) out.stage = stage;
 
-  // Override suggestedCount and severity from priority (transcript classification)
+  // Override severity/critical from priority (transcript classification) — unit counts come from LLM
   try {
     const priority = await getSituationPriority(text);
-    const { suggestedCount: priorityCount, severity: prioritySeverity, critical: priorityCritical } = priorityToDispatch(priority);
+    const { suggestedCount: priorityCount, severity: prioritySeverity, critical: priorityCritical } =
+      priorityToDispatch(priority);
     out.suggestedCount = priorityCount;
     out.severity = prioritySeverity;
     out.critical = priorityCritical;
-    // If LLM inferred more units from victim count (e.g. "five people shot"), use at least that many
     const llmCount =
       typeof parsed.suggestedCount === 'number' && Number.isInteger(parsed.suggestedCount)
         ? Math.min(10, Math.max(1, parsed.suggestedCount))
