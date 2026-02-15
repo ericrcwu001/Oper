@@ -832,7 +832,7 @@ export default function LiveSimulationPage({
 
   return (
     <AppShell>
-      <div className="flex h-[calc(100vh-3.5rem)] flex-col px-4 lg:px-6">
+      <div className="flex h-screen flex-col pl-14 pr-4 lg:pl-16 lg:pr-6">
         {/* Compact header */}
         <div className="flex shrink-0 items-center justify-between gap-4 border-b py-3">
           <div className="flex min-w-0 items-center gap-3">

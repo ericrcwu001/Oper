@@ -697,9 +697,9 @@ export function SFMap({
                 value:
                   typeof point.status === "string"
                     ? point.status
-                    : point.status === true
+                    : point.status === 1 || point.status === true
                       ? "En route"
-                      : point.status === false
+                      : point.status === 0 || point.status === false
                         ? "Idle"
                         : "Unknown",
               },

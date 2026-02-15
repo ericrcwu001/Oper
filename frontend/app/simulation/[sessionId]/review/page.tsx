@@ -202,7 +202,7 @@ export default function ReviewPage({
 
   return (
     <AppShell>
-      <div className="mx-auto max-w-7xl px-4 py-10 lg:px-6">
+      <div className="mx-auto max-w-7xl pl-14 pr-4 py-10 lg:pl-16 lg:pr-6">
         {/* Header */}
         <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
