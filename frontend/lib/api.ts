@@ -235,6 +235,7 @@ export interface Evaluation {
   timeliness: number
   criticalInfoCapture: number
   overallScore: number
+  strengths?: string[]
   missedActions: string[]
   feedbackBullets: string[]
 }
@@ -339,17 +340,20 @@ export interface ClosestVehiclesResponse {
 
 /**
  * Get closest available vehicle IDs for an incident location (no LLM).
- * GET /api/call-evaluation/closest?lat=...&lng=...
- * Use for live-updating map highlights as vehicles move.
+ * GET /api/call-evaluation/closest?lat=...&lng=...&neededTypes=ambulance,police
+ * When neededTypes is provided, only vehicles matching the dispatch-needed types are returned.
  */
-export async function fetchClosestVehicles(incidentLocation: {
-  lat: number
-  lng: number
-}): Promise<ClosestVehiclesResponse> {
+export async function fetchClosestVehicles(
+  incidentLocation: { lat: number; lng: number },
+  options?: { neededTypes?: string[] }
+): Promise<ClosestVehiclesResponse> {
   const params = new URLSearchParams({
     lat: String(incidentLocation.lat),
     lng: String(incidentLocation.lng),
   })
+  if (options?.neededTypes?.length) {
+    params.set("neededTypes", options.neededTypes.join(","))
+  }
   const res = await fetch(`${API_BASE}/api/call-evaluation/closest?${params}`)
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))

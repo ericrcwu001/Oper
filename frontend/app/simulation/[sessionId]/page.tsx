@@ -36,6 +36,8 @@ import {
   Loader2,
   AlertCircle,
   Shield,
+  CheckCircle2,
+  SendHorizontal,
 } from "lucide-react"
 import { scenarios } from "@/lib/mock-data"
 import {
@@ -211,6 +213,37 @@ function unitTypeToSimType(unit: string): "ambulance" | "police" | "fire" | null
     default:
       return null
   }
+}
+
+/** Derive police / fire / medical counts from AI units list (for auto-populating dispatch count inputs). */
+function unitsToCounts(units: { unit: string }[]): { police: number; fire: number; medical: number } {
+  let police = 0
+  let fire = 0
+  let medical = 0
+  for (const u of units ?? []) {
+    const t = unitTypeToSimType(u.unit)
+    if (t === "police") police++
+    else if (t === "fire") fire++
+    else if (t === "ambulance") medical++
+  }
+  return { police, fire, medical }
+}
+
+/** Group AI units by type: { unitType, count, rationale } (first rationale per type). */
+function groupUnitsByType(
+  units: { unit: string; rationale?: string }[]
+): { unitType: string; count: number; rationale?: string }[] {
+  const byType = new Map<string, { count: number; rationale?: string }>()
+  for (const u of units ?? []) {
+    const cur = byType.get(u.unit)
+    if (!cur) {
+      byType.set(u.unit, { count: 1, rationale: u.rationale })
+    } else {
+      cur.count++
+      if (!cur.rationale && u.rationale) cur.rationale = u.rationale
+    }
+  }
+  return [...byType.entries()].map(([unitType, { count, rationale }]) => ({ unitType, count, rationale }))
 }
 
 /** Initial map points. Optional override911 uses scenario-generated SF location for the 911 call. */
@@ -480,6 +513,14 @@ export default function LiveSimulationPage({
     closestVehicleIds?: string[]
     closestVehicleByType?: { ambulance?: string | null; police?: string | null; fire?: string | null }
   } | null>(null)
+  /** Editable unit counts (police / fire / medical); auto-populated from AI, used for map highlights. */
+  const [dispatchUnitCounts, setDispatchUnitCounts] = useState<{
+    police: number
+    fire: number
+    medical: number
+  }>({ police: 0, fire: 0, medical: 0 })
+  /** True after operator clicks Dispatch (visual confirmation only). */
+  const [hasDispatched, setHasDispatched] = useState(false)
   const [isAssessingDispatch, setIsAssessingDispatch] = useState(false)
   /** Closest-available vehicle IDs for map highlight; updated by assess + polling so highlights stay live. */
   const [highlightedVehicleIds, setHighlightedVehicleIds] = useState<string[]>([])
@@ -984,18 +1025,54 @@ export default function LiveSimulationPage({
     return () => { cancelled = true }
   }, [callActive, conversationHistory, scenarioCallLocation])
 
-  // Poll closest-available vehicles every 2s while call is active so map highlight updates as positions/availability change
+  // Sync editable unit counts from AI when recommendation updates (units only; ignore suggestedCount)
+  useEffect(() => {
+    if (!dispatchRecommendation?.units?.length) return
+    setDispatchUnitCounts(unitsToCounts(dispatchRecommendation.units))
+  }, [dispatchRecommendation?.units])
+
+  // Build needed types for map highlight from editable counts (police, fire, medical → ambulance)
+  const neededTypesForClosest = useMemo(() => {
+    if (!dispatchRecommendation) return undefined
+    const { police, fire, medical } = dispatchUnitCounts
+    if (police === 0 && fire === 0 && medical === 0) return undefined
+    const types: ("police" | "fire" | "ambulance")[] = []
+    for (let i = 0; i < police; i++) types.push("police")
+    for (let i = 0; i < fire; i++) types.push("fire")
+    for (let i = 0; i < medical; i++) types.push("ambulance")
+    return types
+  }, [dispatchRecommendation, dispatchUnitCounts])
+
+  // Per-field match: highlight only inputs that match AI recommendation
+  const dispatchMatchByField = useMemo(() => {
+    if (!dispatchRecommendation?.units?.length)
+      return { police: false, fire: false, medical: false }
+    const ai = unitsToCounts(dispatchRecommendation.units)
+    return {
+      police: dispatchUnitCounts.police === ai.police,
+      fire: dispatchUnitCounts.fire === ai.fire,
+      medical: dispatchUnitCounts.medical === ai.medical,
+    }
+  }, [dispatchRecommendation?.units, dispatchUnitCounts])
+
+  const dispatchMatchesRecommendation =
+    dispatchMatchByField.police && dispatchMatchByField.fire && dispatchMatchByField.medical
+
   useEffect(() => {
     if (!callActive) {
       setHighlightedVehicleIds([])
       setClosestVehicleByType(null)
+      setDispatchUnitCounts({ police: 0, fire: 0, medical: 0 })
+      setHasDispatched(false)
       return
     }
     const incidentLocation =
       scenarioCallLocation ?? { lat: DEFAULT_911_POINT.lat, lng: DEFAULT_911_POINT.lng }
     const poll = async () => {
       try {
-        const res = await fetchClosestVehicles(incidentLocation)
+        const res = await fetchClosestVehicles(incidentLocation, {
+          neededTypes: neededTypesForClosest,
+        })
         setHighlightedVehicleIds(res.closestVehicleIds)
         if (res.closestVehicleByType) setClosestVehicleByType(res.closestVehicleByType)
       } catch {
@@ -1005,7 +1082,7 @@ export default function LiveSimulationPage({
     poll()
     const interval = setInterval(poll, 2000)
     return () => clearInterval(interval)
-  }, [callActive, scenarioCallLocation])
+  }, [callActive, scenarioCallLocation, neededTypesForClosest])
 
   // Hint system
   const hintActions =
@@ -1614,15 +1691,6 @@ export default function LiveSimulationPage({
                         </ul>
                       </div>
                     )}
-                    {dispatchRecommendation.suggestedCount != null && (
-                      <p className="text-xs font-medium text-foreground">
-                        Suggest sending{" "}
-                        <span className="text-primary font-semibold">
-                          {dispatchRecommendation.suggestedCount} unit
-                          {dispatchRecommendation.suggestedCount !== 1 ? "s" : ""}
-                        </span>
-                      </p>
-                    )}
                     <p className="text-xs text-muted-foreground">
                       Severity:{" "}
                       <span
@@ -1637,17 +1705,87 @@ export default function LiveSimulationPage({
                         {dispatchRecommendation.critical && " (critical)"}
                       </span>
                     </p>
-                    <ul className="list-none space-y-1 text-xs">
-                      {dispatchRecommendation.units.map((u, i) => {
-                        const vehicleId = (() => {
-                          const simType = unitTypeToSimType(u.unit)
-                          if (!simType) return null
-                          return (closestVehicleByType ?? dispatchRecommendation.closestVehicleByType)?.[simType] ?? null
-                        })()
+                    <div className="grid grid-cols-3 gap-2">
+                      <label className="flex flex-col gap-1">
+                        <span className="text-xs font-medium text-muted-foreground">Police</span>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={10}
+                          value={dispatchUnitCounts.police}
+                          onChange={(e) => {
+                            const v = Math.min(10, Math.max(0, parseInt(e.target.value, 10) || 0))
+                            setDispatchUnitCounts((c) => ({ ...c, police: v }))
+                          }}
+                          className={cn(
+                            "h-8 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
+                            dispatchMatchByField.police && "ring-2 ring-emerald-500/60 border-emerald-500/50"
+                          )}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-xs font-medium text-muted-foreground">Fire</span>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={10}
+                          value={dispatchUnitCounts.fire}
+                          onChange={(e) => {
+                            const v = Math.min(10, Math.max(0, parseInt(e.target.value, 10) || 0))
+                            setDispatchUnitCounts((c) => ({ ...c, fire: v }))
+                          }}
+                          className={cn(
+                            "h-8 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
+                            dispatchMatchByField.fire && "ring-2 ring-emerald-500/60 border-emerald-500/50"
+                          )}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-xs font-medium text-muted-foreground">Medical</span>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={10}
+                          value={dispatchUnitCounts.medical}
+                          onChange={(e) => {
+                            const v = Math.min(10, Math.max(0, parseInt(e.target.value, 10) || 0))
+                            setDispatchUnitCounts((c) => ({ ...c, medical: v }))
+                          }}
+                          className={cn(
+                            "h-8 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
+                            dispatchMatchByField.medical && "ring-2 ring-emerald-500/60 border-emerald-500/50"
+                          )}
+                        />
+                      </label>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {hasDispatched ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-md bg-primary/15 px-2 py-1 text-xs font-medium text-primary">
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          Dispatched
+                        </span>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant={dispatchMatchesRecommendation ? "default" : "outline"}
+                          className="h-7 min-h-7 gap-1 px-2 text-xs"
+                          onClick={() => setHasDispatched(true)}
+                        >
+                          <SendHorizontal className="h-3 w-3" />
+                          Dispatch
+                        </Button>
+                      )}
+                    </div>
+                    <ul className="list-none space-y-1.5 text-xs">
+                      {groupUnitsByType(dispatchRecommendation.units).map(({ unitType, count, rationale }) => {
+                        const simType = unitTypeToSimType(unitType)
+                        const vehicleId = simType
+                          ? (closestVehicleByType ?? dispatchRecommendation.closestVehicleByType)?.[simType] ?? null
+                          : null
                         const point = vehicleId ? mapPoints.find((p) => p.id === vehicleId) : null
                         const canZoom = Boolean(point)
                         return (
-                          <li key={i}>
+                          <li key={unitType}>
                             <button
                               type="button"
                               onClick={() => {
@@ -1662,9 +1800,9 @@ export default function LiveSimulationPage({
                                 canZoom && "cursor-pointer"
                               )}
                             >
-                              <span className="font-medium">{u.unit}</span>
-                              {u.rationale && (
-                                <span className="text-muted-foreground"> — {u.rationale}</span>
+                              <span className="font-medium">{unitType} × {count}</span>
+                              {rationale && (
+                                <span className="text-muted-foreground"> — {rationale}</span>
                               )}
                             </button>
                           </li>

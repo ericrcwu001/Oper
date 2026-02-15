@@ -30,7 +30,8 @@ function formatDuration(sec: number) {
 
 function scoreColor(score: number) {
   if (score >= 90) return "text-accent"
-  if (score >= 75) return "text-[hsl(var(--warning))]"
+  if (score >= 75) return "text-emerald-600 dark:text-emerald-400"
+  if (score >= 50) return "text-[hsl(var(--warning))]"
   return "text-destructive"
 }
 

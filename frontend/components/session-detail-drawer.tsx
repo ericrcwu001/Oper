@@ -26,7 +26,14 @@ interface SessionDetailDrawerProps {
 }
 
 function ScoreBadge({ label, score, icon: Icon }: { label: string; score: number; icon: React.ElementType }) {
-  const color = score >= 90 ? "text-accent" : score >= 75 ? "text-[hsl(var(--warning))]" : "text-destructive"
+  const color =
+    score >= 90
+      ? "text-accent"
+      : score >= 75
+        ? "text-emerald-600 dark:text-emerald-400"
+        : score >= 50
+          ? "text-[hsl(var(--warning))]"
+          : "text-destructive"
   return (
     <div className="flex items-center justify-between border border-border bg-muted/50 px-3 py-1.5">
       <div className="flex items-center gap-2">

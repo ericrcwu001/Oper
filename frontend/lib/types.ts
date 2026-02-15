@@ -58,6 +58,7 @@ export interface Evaluation {
   timeliness: number
   criticalInfoCapture: number
   overallScore: number
+  strengths?: string[]
   missedActions: string[]
   feedbackBullets: string[]
   transcriptHighlights?: TranscriptHighlight[]

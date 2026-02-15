@@ -10,14 +10,16 @@ interface ScoreCardProps {
 }
 
 function getScoreColor(score: number) {
-  if (score >= 90) return "text-accent"
-  if (score >= 75) return "text-[hsl(var(--warning))]"
+  if (score >= 90) return "text-accent" // excellent: bright green
+  if (score >= 75) return "text-emerald-600 dark:text-emerald-400" // good: positive green
+  if (score >= 50) return "text-[hsl(var(--warning))]" // average: amber
   return "text-destructive"
 }
 
 function getScoreBg(score: number) {
   if (score >= 90) return "bg-accent/10"
-  if (score >= 75) return "bg-[hsl(var(--warning)/0.1)]"
+  if (score >= 75) return "bg-emerald-500/10"
+  if (score >= 50) return "bg-[hsl(var(--warning)/0.1)]"
   return "bg-destructive/10"
 }
 
@@ -51,7 +53,13 @@ export function ScoreCard({ label, score, icon: Icon }: ScoreCardProps) {
           <div
             className={cn(
               "h-full rounded-full transition-all",
-              score >= 90 ? "bg-accent" : score >= 75 ? "bg-[hsl(var(--warning))]" : "bg-destructive"
+              score >= 90
+                ? "bg-accent"
+                : score >= 75
+                  ? "bg-emerald-500"
+                  : score >= 50
+                    ? "bg-[hsl(var(--warning))]"
+                    : "bg-destructive"
             )}
             style={{ width: `${score}%` }}
           />

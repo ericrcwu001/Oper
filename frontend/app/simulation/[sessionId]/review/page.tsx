@@ -371,6 +371,31 @@ export default function ReviewPage({
         <div className="grid gap-6 lg:grid-cols-2">
           {/* Left Column */}
           <div className="flex flex-col gap-6">
+            {/* What you did well */}
+            {evaluation != null && (evaluation.strengths?.length ?? 0) > 0 && (
+              <Card className="border border-emerald-500/20 bg-card">
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base text-emerald-700 dark:text-emerald-400">
+                    <CheckCircle2 className="h-4 w-4" />
+                    What you did well
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ul className="flex flex-col gap-2">
+                    {evaluation.strengths!.map((s, i) => (
+                      <li
+                        key={i}
+                        className="flex items-start gap-2 rounded-md border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-sm text-foreground"
+                      >
+                        <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                        {s}
+                      </li>
+                    ))}
+                  </ul>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Missed Actions */}
             <Card className="border bg-card">
               <CardHeader className="pb-3">

@@ -49,6 +49,54 @@ export function rankByProximityAndETA(incidentLatLng, vehicles) {
 }
 
 /**
+ * Return closest vehicle IDs that satisfy the dispatch-needed types (e.g. 2 ambulances, 1 police).
+ * @param {{ lat: number, lng: number }} incidentLatLng - Incident (caller) position
+ * @param {Vehicle[]} vehicles - List of vehicles (id, type, lat, lng, status)
+ * @param {string[]} neededTypes - Sim types needed, in order (e.g. ['ambulance', 'ambulance', 'police'])
+ * @returns {{ closestVehicleIds: string[], closestVehicleByType: { ambulance?: string | null, police?: string | null, fire?: string | null } }}
+ */
+export function getClosestVehiclesForNeededTypes(incidentLatLng, vehicles, neededTypes) {
+  const { byType } = rankByProximityAndETA(incidentLatLng, vehicles);
+  const closestVehicleIds = [];
+  const usedIndex = { ambulance: 0, police: 0, fire: 0 };
+  for (const t of neededTypes || []) {
+    const list = byType[t];
+    if (!list) continue;
+    const idx = usedIndex[t] ?? 0;
+    if (idx < list.length) {
+      closestVehicleIds.push(list[idx].id);
+      usedIndex[t] = idx + 1;
+    }
+  }
+  const closestVehicleByType = {
+    ambulance: byType.ambulance?.[0]?.id ?? null,
+    police: byType.police?.[0]?.id ?? null,
+    fire: byType.fire?.[0]?.id ?? null,
+  };
+  return { closestVehicleIds, closestVehicleByType };
+}
+
+/**
+ * Map LLM unit type (EMT_BLS, ALS, Police, Fire, SWAT) to sim vehicle type.
+ * @param {string} unit
+ * @returns {string | null} 'ambulance' | 'police' | 'fire' | null
+ */
+export function unitTypeToSimType(unit) {
+  switch (unit) {
+    case 'EMT_BLS':
+    case 'ALS':
+      return 'ambulance';
+    case 'Police':
+    case 'SWAT':
+      return 'police';
+    case 'Fire':
+      return 'fire';
+    default:
+      return null;
+  }
+}
+
+/**
  * @param {{ lat: number, lng: number }} incidentLatLng
  * @param {Record<string, RankedUnit[]>} byType
  * @returns {string}

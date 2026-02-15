@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { assessTranscriptWithLLM } from '../services/liveEvalService.js';
 import { classifyTranscript } from '../services/openaiService.js';
 import { getPositions } from '../services/vehicleSimulation.js';
-import { rankByProximityAndETA } from '../services/proximityRanking.js';
+import { rankByProximityAndETA, getClosestVehiclesForNeededTypes, unitTypeToSimType } from '../services/proximityRanking.js';
 
 const router = Router();
 
@@ -10,8 +10,9 @@ const router = Router();
 const DEFAULT_INCIDENT = { lat: 37.7749, lng: -122.4194 };
 
 /**
- * GET /api/call-evaluation/closest?lat=...&lng=...
- * Returns { closestVehicleIds } only (no LLM). Use for live map highlighting as vehicles move.
+ * GET /api/call-evaluation/closest?lat=...&lng=...&neededTypes=ambulance,police,fire
+ * Returns { closestVehicleIds, closestVehicleByType }. If neededTypes is provided (comma-separated
+ * sim types, e.g. ambulance,ambulance,police), only the closest vehicles matching those types are returned.
  */
 router.get('/closest', (req, res) => {
   try {
@@ -21,17 +22,31 @@ router.get('/closest', (req, res) => {
       Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : DEFAULT_INCIDENT;
 
     const vehicles = getPositions();
-    const { byType } = rankByProximityAndETA(incidentLatLng, vehicles);
-    const closestVehicleIds = [
-      ...(byType.ambulance || []),
-      ...(byType.police || []),
-      ...(byType.fire || []),
-    ].map((u) => u.id);
-    const closestVehicleByType = {
-      ambulance: byType.ambulance?.[0]?.id ?? null,
-      police: byType.police?.[0]?.id ?? null,
-      fire: byType.fire?.[0]?.id ?? null,
-    };
+    const neededTypesParam = req.query.neededTypes;
+    const neededTypes =
+      typeof neededTypesParam === 'string' && neededTypesParam.length > 0
+        ? neededTypesParam.split(',').map((s) => s.trim()).filter(Boolean)
+        : null;
+
+    let closestVehicleIds;
+    let closestVehicleByType;
+    if (neededTypes && neededTypes.length > 0) {
+      const result = getClosestVehiclesForNeededTypes(incidentLatLng, vehicles, neededTypes);
+      closestVehicleIds = result.closestVehicleIds;
+      closestVehicleByType = result.closestVehicleByType;
+    } else {
+      const { byType } = rankByProximityAndETA(incidentLatLng, vehicles);
+      closestVehicleIds = [
+        ...(byType.ambulance || []),
+        ...(byType.police || []),
+        ...(byType.fire || []),
+      ].map((u) => u.id);
+      closestVehicleByType = {
+        ambulance: byType.ambulance?.[0]?.id ?? null,
+        police: byType.police?.[0]?.id ?? null,
+        fire: byType.fire?.[0]?.id ?? null,
+      };
+    }
 
     res.json({ closestVehicleIds, closestVehicleByType });
   } catch (e) {
@@ -55,20 +70,32 @@ router.post('/assess', async (req, res) => {
         : DEFAULT_INCIDENT;
 
     const vehicles = getPositions();
-    const { byType } = rankByProximityAndETA(incidentLatLng, vehicles);
-    const closestVehicleIds = [
-      ...(byType.ambulance || []),
-      ...(byType.police || []),
-      ...(byType.fire || []),
-    ].map((u) => u.id);
-    const closestVehicleByType = {
-      ambulance: byType.ambulance?.[0]?.id ?? null,
-      police: byType.police?.[0]?.id ?? null,
-      fire: byType.fire?.[0]?.id ?? null,
-    };
-
     // Do NOT pass resourceSummary (derived from incidentLocation)—recommendations must be transcript-only
     const result = await assessTranscriptWithLLM(transcript, {});
+
+    // Highlight closest vehicles that match dispatch recommendations (type and count)
+    const neededTypes = (result.units || [])
+      .map((u) => unitTypeToSimType(u.unit))
+      .filter(Boolean);
+    const { closestVehicleIds, closestVehicleByType } =
+      neededTypes.length > 0
+        ? getClosestVehiclesForNeededTypes(incidentLatLng, vehicles, neededTypes)
+        : (() => {
+            const { byType } = rankByProximityAndETA(incidentLatLng, vehicles);
+            return {
+              closestVehicleIds: [
+                ...(byType.ambulance || []),
+                ...(byType.police || []),
+                ...(byType.fire || []),
+              ].map((u) => u.id),
+              closestVehicleByType: {
+                ambulance: byType.ambulance?.[0]?.id ?? null,
+                police: byType.police?.[0]?.id ?? null,
+                fire: byType.fire?.[0]?.id ?? null,
+              },
+            };
+          })();
+
     res.json({ ...result, closestVehicleIds, closestVehicleByType });
   } catch (e) {
     const message = e.message || 'Assessment failed';

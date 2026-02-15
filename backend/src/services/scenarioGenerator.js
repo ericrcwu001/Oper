@@ -80,12 +80,12 @@ function pickRandomScenarioType(difficulty) {
 const SYSTEM_PROMPT = `You are an AI 911 training assistant. Generate exactly ONE realistic emergency scenario. Output valid JSON only, no markdown.
 
 Rules:
-- Realistic, grounded emergencies. No language-barrier scenarios (caller always speaks English). Use the scenario_type from the user message. Easy: fire, cardiac, accident, fall, choking, lost child, gas leak. Medium: domestic dispute, overdose, robbery, assault, mental health. Hard: shooting, domestic violence, barricaded, hostage, mass casualty, suicidal, hoax.
-- Scenario is in San Francisco. Include in scenario a location: address (human-readable, e.g. "2500 Mission St, San Francisco"), lat and lng as numbers with at least 5 decimal places (lat 37.7–37.83, lng -122.52 to -122.35) so the incident can be shown precisely on the SF map.
+- Realistic, grounded emergencies. No language-barrier scenarios (caller always speaks English). Use the scenario_type from the user message.
+- Scenario is in San Francisco. Include in scenario a location: address (human-readable, e.g. "2500 Mission St, San Francisco"), lat and lng as numbers with at least 5 decimal places (lat 37.7–37.83, lng -122.52 to -122.35) so the incident can be shown precisely on the SF map. Choose a location that is realistic for the scenario type and difficulty, and choose a variety of locations, especially ones in downtown.
 - scenario: id, scenario_type, title, description (2-4 sentences; for hard: describe an evolving situation—initial crisis plus how it can escalate or cascade), caller_profile, critical_info (4-7 facts; for hard include details that become relevant as situation evolves), expected_actions (4-7), optional_complications (1-3; for hard include escalation/cascade possibilities), difficulty, language "en", location: { address: "", lat: 37.77492, lng: -122.41941 } (use 5+ decimals for lat/lng).
 - persona: stability 0-1 (lower=more emotional), style 0-1, speed ~1.0, voice_description (accent, age, gender, tone). Match difficulty: easy=calm/clear (0.7+ stability); medium=anxious (0.4-0.55); hard=panicked (0.15-0.35).
 - Voice-agent fields (match difficulty): role_instruction (one line "You are [name], [age], calling 911..."), scenario_summary_for_agent (2-4 sentences; for hard, include that the situation may escalate or change and the caller will report new developments as they happen), withheld_information (0-4 items), behavior_notes, dialogue_directions (how to speak: easy=clear; hard=fragmented, crying), response_behavior (when to give address/info), opening_line, do_not_say (stay in character).
-- timeline: Include only things that happen in the scene that the operator can act on (e.g. person stops breathing, smoke appears, victim becomes unresponsive, second person found, roof caves in, shooter enters the room, weapon produced, fire spreads to adjacent building, suspect moves). Do NOT include caller behavior or emotion—forbidden: "caller becomes quieter", "caller starts crying", "caller gets more panicked", "caller goes silent", "tension rises", "caller gets more upset". Only concrete events and actionable information. Easy/medium: 1–3 events. Hard: 3–5+ events that are major scene changes (escalations, cascading danger, new threat), not filler. Empty {} only when the situation has no developing scene.
+- timeline: Include only things that happen in the scene that the operator can act on (e.g. person stops breathing, smoke appears, victim becomes unresponsive, second person found, roof caves in, shooter enters the room, weapon produced, fire spreads to adjacent building, suspect moves). Do NOT include caller behavior or emotion—forbidden: "caller becomes quieter", "caller starts crying", "caller gets more panicked", "caller goes silent", "tension rises", "caller gets more upset". Only concrete events and actionable information. Easy/medium: 0–3 events. Hard: 3–5+ events that are major scene changes (escalations, cascading danger, new threat), not filler. Empty {} when the situation has no developing scene.
 
 Difficulty: Easy=calm, volunteers info. Medium=stressed, needs prompting. Hard=panicked, does not volunteer address or key facts; multi-phase with escalations.
 
@@ -107,7 +107,7 @@ Output JSON (these keys only):
 function userPrompt(difficulty, scenarioType) {
   const base = `Generate one 911 training scenario for difficulty: ${difficulty}. Scenario type for this request must be: ${scenarioType}. Use that scenario_type in the JSON and build the scenario around it. Return only the JSON object, no other text. Ensure the scenario is realistic, grounded, and appropriate for 911 operator training.`;
   if (difficulty === 'hard') {
-    return `${base} Make it complex and dynamic: the situation should evolve during the call—sudden escalations (shooter enters the room, weapon pulled), cascading events (crash triggers fire that spreads). Include 3–5 timeline events: only concrete scene changes the operator can act on (e.g. shooter enters room, weapon produced, fire spreads to building, second victim found). No filler (no "caller gets more upset", "tension rises", or caller emotion).`;
+    return `${base} Make it complex and dynamic: the situation should evolve during the call—sudden escalations (shooter enters the room, weapon pulled), cascading events (crash triggers fire that spreads), new information (e.g. second victim found), unexpected developments. Include 3–5 timeline events: only concrete scene changes the operator can act on (e.g. shooter enters room, weapon produced, fire spreads to building, second victim found). No filler (no "caller gets more upset", "tension rises", or caller emotion).`;
   }
   return base;
 }
@@ -118,20 +118,103 @@ function userPrompt(difficulty, scenarioType) {
 
 const VALID_DIFFICULTIES = ['easy', 'medium', 'hard'];
 
+/** True when DEMO env is set to "true" or "1" (case-insensitive). */
+function isDemoMode() {
+  const v = process.env.DEMO;
+  return v === 'true' || v === '1' || (typeof v === 'string' && v.trim().toLowerCase() === 'true');
+}
+
+/**
+ * Hard-coded scenario used when DEMO=true. Same shape as LLM output; deriveVoiceFields fills the rest.
+ * @param {string} difficulty - "easy" | "medium" | "hard" (used for persona/behavior derivation).
+ */
+function getDemoScenarioPayload(difficulty) {
+  return {
+    scenario: {
+      id: 'demo-scenario-911',
+      scenario_type: 'traffic-accident',
+      title: 'Two-car collision with injuries',
+      description: 'A two-vehicle collision at an intersection. One driver is conscious but in pain; the other may have hit their head. Bystanders are present. The caller is a witness who stopped to help.',
+      caller_profile: {
+        name: 'Jordan',
+        age: 34,
+        emotion: 'anxious',
+        gender: 'neutral',
+        race: '',
+        other_relevant_details: 'Witness at scene; not in either vehicle.',
+      },
+      critical_info: [
+        'Location: 2500 Mission St at 21st St, San Francisco',
+        'Two vehicles involved; one driver possibly head injury',
+        'Other driver conscious, complaining of neck pain',
+        'No fire or fuel leak observed',
+        'Bystanders directing traffic',
+      ],
+      expected_actions: [
+        'Get exact address and cross streets',
+        'Confirm number of vehicles and people involved',
+        'Ask about consciousness and obvious injuries',
+        'Advise caller to stay on line and not move injured if unsafe',
+        'Dispatch police and EMS as appropriate',
+      ],
+      optional_complications: ['Caller may get distracted by scene', 'Background noise from traffic'],
+      difficulty,
+      language: 'en',
+      location: {
+        address: '2500 Mission St at 21st St, San Francisco',
+        lat: 37.75492,
+        lng: -122.41891,
+      },
+    },
+    timeline: {
+      '45': 'Bystander reports the conscious driver is trying to get out of the car.',
+      '90': 'Caller says they see flashing lights—another driver may have called 911.',
+    },
+  };
+}
+
 /**
  * Generate a single scenario payload for the given difficulty.
  * The LLM returns only scenario + timeline; persona and other voice-agent fields
  * are derived in-code so generation is faster and cheaper.
+ * When DEMO=true, returns a hard-coded scenario (no LLM call).
  *
  * @param {string} difficulty - One of "easy", "medium", "hard".
  * @returns {Promise<object>} Payload with scenario, timeline, and derived persona, role_instruction,
  *   scenario_summary_for_agent, etc. (same shape as before for downstream consumers).
- * @throws {Error} If OPENAI_API_KEY is missing, difficulty is invalid, or OpenAI API errors.
+ * @throws {Error} If OPENAI_API_KEY is missing (when not DEMO), difficulty is invalid, or OpenAI API errors.
  */
 export async function generateScenario(difficulty) {
   const normalized = difficulty?.trim?.().toLowerCase();
   if (!VALID_DIFFICULTIES.includes(normalized)) {
     throw new Error('difficulty must be one of: easy, medium, hard');
+  }
+
+  if (isDemoMode()) {
+    const payload = getDemoScenarioPayload(normalized);
+    const scenario = payload.scenario || {};
+
+    // Reuse same normalization as LLM path (location bounds, timeline, voice fields)
+    if (!scenario.location || typeof scenario.location !== 'object') {
+      scenario.location = { address: 'San Francisco, CA', lat: 37.7749, lng: -122.4194 };
+    }
+    const SF_LAT_MIN = 37.7;
+    const SF_LAT_MAX = 37.83;
+    const SF_LNG_MIN = -122.52;
+    const SF_LNG_MAX = -122.35;
+    const loc = scenario.location;
+    loc.lat = Math.max(SF_LAT_MIN, Math.min(SF_LAT_MAX, Number(loc.lat) || 37.7749));
+    loc.lng = Math.max(SF_LNG_MIN, Math.min(SF_LNG_MAX, Number(loc.lng) || -122.4194));
+    if (typeof loc.address !== 'string' || !loc.address.trim()) {
+      loc.address = 'San Francisco, CA';
+    }
+    payload.scenario = scenario;
+
+    if (payload.timeline == null || typeof payload.timeline !== 'object' || Array.isArray(payload.timeline)) {
+      payload.timeline = {};
+    }
+    deriveVoiceFields(payload);
+    return payload;
   }
 
   const apiKey = config.openai?.apiKey || process.env.OPENAI_API_KEY;

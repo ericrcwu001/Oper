@@ -190,7 +190,7 @@ export async function getNextCallerResponse(
       : '';
   const systemPrompt = `You are playing the role of a 911 caller in a training simulation. 
 The following describes the emergency situation. Stay in character and respond as the caller would: 
-realistic, emotional when appropriate, and concise.
+realistic and emotional when appropriate. Make it sound like the caller is a real person with their own thoughts, feelings, and life.
 
 ${guidance}
 ${personaBlock}
