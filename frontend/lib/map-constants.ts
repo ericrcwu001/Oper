@@ -83,19 +83,19 @@ export const MAP_POINT_911_RADIUS_SELECTED_BY_ZOOM: [number, number][] = [
 export const MAP_POINT_SELECTED_RADIUS_OFFSET = 2.5
 
 /** 911 beacon extrusion height in meters (visible when map is tilted in 3D). */
-export const MAP_POINT_911_BEACON_HEIGHT_M = 500
+export const MAP_POINT_911_BEACON_HEIGHT_M = 750
 
-/** 911 beacon color (neon red for visibility in 3D). */
-export const MAP_POINT_911_BEACON_COLOR = "#FF073A"
+/** 911 beacon color (neon red, transparent but bright). */
+export const MAP_POINT_911_BEACON_COLOR = "#FF336680"
 
 /** 911 beacon footprint half-side in degrees (~25m at SF latitude). */
 export const MAP_POINT_911_BEACON_FOOTPRINT = 0.00022
 
-/** Crime beacon extrusion height in meters (smaller pillars in 3D). */
-export const MAP_POINT_CRIME_BEACON_HEIGHT_M = 500
+/** Crime beacon extrusion height in meters (shorter than 911 in 3D). */
+export const MAP_POINT_CRIME_BEACON_HEIGHT_M = 400
 
-/** Crime beacon color (yellow to match crime points). */
-export const MAP_POINT_CRIME_BEACON_COLOR = "#FCD34D"
+/** Crime beacon color (yellow to match crime points, transparent but bright). */
+export const MAP_POINT_CRIME_BEACON_COLOR = "#FDE04780"
 
 /** Crime beacon footprint half-side in degrees (smaller than 911). */
 export const MAP_POINT_CRIME_BEACON_FOOTPRINT = 0.00012

@@ -17,12 +17,8 @@ import {
   CRIME_POINT_RADIUS_BY_ZOOM,
   MAP_POINT_911_BEACON_HEIGHT_M,
   MAP_POINT_911_BEACON_COLOR,
-  MAP_POINT_911_BEACON_FOOTPRINT,
   MAP_POINT_CRIME_BEACON_HEIGHT_M,
   MAP_POINT_CRIME_BEACON_COLOR,
-  MAP_POINT_CRIME_BEACON_FOOTPRINT,
-  MAP_POINT_911_STROKE_COLOR,
-  CRIME_POINT_STROKE_COLOR,
 } from "@/lib/map-constants"
 import { getSFMapStyle } from "@/lib/map-style"
 
@@ -52,48 +48,133 @@ function pointsToGeoJSON(points: MapPoint[]): GeoJSON.FeatureCollection {
   }
 }
 
-/** Small square polygon around a point for fill-extrusion beacon (vertical pillar in 3D). */
-function points911ToBeaconGeoJSON(points: MapPoint[]): GeoJSON.FeatureCollection {
-  const h = MAP_POINT_911_BEACON_FOOTPRINT
+/** Interpolate circle radius (px) from zoom using [zoom, radius] pairs. */
+function radiusAtZoom(zoomLevels: [number, number][], zoom: number): number {
+  const sorted = [...zoomLevels].sort((a, b) => a[0] - b[0])
+  if (zoom <= sorted[0][0]) return sorted[0][1]
+  if (zoom >= sorted[sorted.length - 1][0]) return sorted[sorted.length - 1][1]
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const [z0, r0] = sorted[i]
+    const [z1, r1] = sorted[i + 1]
+    if (zoom >= z0 && zoom <= z1) {
+      const t = (zoom - z0) / (z1 - z0)
+      return r0 + t * (r1 - r0)
+    }
+  }
+  return sorted[0][1]
+}
+
+/** Convert circle radius (px) at zoom and latitude to radius in degrees (lon direction). MapLibre uses 512 for globe scale. */
+function beaconRadiusDegrees(zoom: number, lat: number, radiusPx: number): number {
+  const worldSize = 512 * Math.pow(2, zoom)
+  const pixelsPerDegreeLon = (worldSize * Math.cos((lat * Math.PI) / 180)) / 360
+  return radiusPx / pixelsPerDegreeLon
+}
+
+/** Create a circular polygon ring (approximates cylinder when extruded). N vertices. Clockwise for fill-extrusion 3D. */
+function circleToRing(centerLng: number, centerLat: number, radiusDegLon: number, segments = 32): [number, number][] {
+  const latScale = Math.cos((centerLat * Math.PI) / 180) // so circle appears round on map
+  const ring: [number, number][] = []
+  for (let i = 0; i <= segments; i++) {
+    const θ = -(2 * Math.PI * i) / segments // clockwise so fill-extrusion renders correctly in 3D
+    ring.push([
+      centerLng + radiusDegLon * Math.cos(θ),
+      centerLat + radiusDegLon * latScale * Math.sin(θ),
+    ])
+  }
+  return ring
+}
+
+/** Create an ellipse polygon ring (for 3D perspective). radiusLonDeg = horizontal, radiusLatDeg = vertical (compressed by pitch). */
+function ellipseToRing(
+  centerLng: number,
+  centerLat: number,
+  radiusLonDeg: number,
+  radiusLatDeg: number,
+  segments = 32
+): [number, number][] {
+  const ring: [number, number][] = []
+  for (let i = 0; i <= segments; i++) {
+    const θ = -(2 * Math.PI * i) / segments
+    ring.push([
+      centerLng + radiusLonDeg * Math.cos(θ),
+      centerLat + radiusLatDeg * Math.sin(θ),
+    ])
+  }
+  return ring
+}
+
+/** Radius in px for a point by type and selected (for ellipse GeoJSON). */
+function getRadiusPxForPoint(
+  zoom: number,
+  type: MapPoint["type"],
+  selected: boolean
+): number {
+  if (type === "911" || type === "crime") {
+    const levels = selected ? MAP_POINT_RADIUS_SELECTED_BY_ZOOM.map(([z, r]) => [z, r * 2] as [number, number]) : CRIME_POINT_RADIUS_BY_ZOOM
+    return radiusAtZoom(levels, zoom)
+  }
+  const levels = selected ? MAP_POINT_RADIUS_UNIT_SELECTED_BY_ZOOM : MAP_POINT_RADIUS_UNIT_BY_ZOOM
+  return radiusAtZoom(levels, zoom)
+}
+
+/** Ellipse GeoJSON for all points; when pitch > 0, lat radius is compressed so points appear as ovals in 3D. */
+function pointsToEllipseGeoJSON(
+  points: MapPoint[],
+  zoom: number,
+  pitchDeg: number,
+  selectedPointId: string | null
+): GeoJSON.FeatureCollection {
+  const cosPitch = Math.max(0.1, Math.cos((pitchDeg * Math.PI) / 180))
+  const features: GeoJSON.Feature<GeoJSON.Polygon>[] = points.map((p) => {
+    const selected = p.id === selectedPointId
+    const radiusPx = getRadiusPxForPoint(zoom, p.type, selected)
+    const radiusLonDeg = beaconRadiusDegrees(zoom, p.lat, radiusPx)
+    const radiusLatDeg = radiusLonDeg * cosPitch
+    return {
+      type: "Feature",
+      id: p.id,
+      geometry: {
+        type: "Polygon",
+        coordinates: [ellipseToRing(p.lng, p.lat, radiusLonDeg, radiusLatDeg)],
+      },
+      properties: {
+        id: p.id,
+        type: p.type,
+        selected: selected,
+        disabled: p.disabled ?? false,
+      },
+    }
+  })
+  return { type: "FeatureCollection", features }
+}
+
+/** Cylindrical beacon polygon around 911 points. Radius in degrees computed per-point so circumference matches circle. */
+function points911ToBeaconGeoJSON(points: MapPoint[], zoom: number, radiusPx: number): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature<GeoJSON.Polygon>[] = points
     .filter((p) => p.type === "911")
     .map((p) => {
-      const [lng, lat] = [p.lng, p.lat]
-      const ring: [number, number][] = [
-        [lng - h, lat - h],
-        [lng + h, lat - h],
-        [lng + h, lat + h],
-        [lng - h, lat + h],
-        [lng - h, lat - h],
-      ]
+      const radiusDeg = beaconRadiusDegrees(zoom, p.lat, radiusPx)
       return {
         type: "Feature",
         id: p.id,
-        geometry: { type: "Polygon", coordinates: [ring] },
+        geometry: { type: "Polygon", coordinates: [circleToRing(p.lng, p.lat, radiusDeg)] },
         properties: { id: p.id },
       }
     })
   return { type: "FeatureCollection", features }
 }
 
-/** Small square polygon for crime fill-extrusion beacon (smaller than 911). */
-function pointsCrimeToBeaconGeoJSON(points: MapPoint[]): GeoJSON.FeatureCollection {
-  const h = MAP_POINT_CRIME_BEACON_FOOTPRINT
+/** Cylindrical beacon polygon around crime points. Radius in degrees computed per-point so circumference matches circle. */
+function pointsCrimeToBeaconGeoJSON(points: MapPoint[], zoom: number, radiusPx: number): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature<GeoJSON.Polygon>[] = points
     .filter((p) => p.type === "crime")
     .map((p) => {
-      const [lng, lat] = [p.lng, p.lat]
-      const ring: [number, number][] = [
-        [lng - h, lat - h],
-        [lng + h, lat - h],
-        [lng + h, lat + h],
-        [lng - h, lat + h],
-        [lng - h, lat - h],
-      ]
+      const radiusDeg = beaconRadiusDegrees(zoom, p.lat, radiusPx)
       return {
         type: "Feature",
         id: p.id,
-        geometry: { type: "Polygon", coordinates: [ring] },
+        geometry: { type: "Polygon", coordinates: [circleToRing(p.lng, p.lat, radiusDeg)] },
         properties: { id: p.id },
       }
     })
@@ -111,6 +192,15 @@ const POINTS_911_BEACONS_SOURCE_ID = "map-points-911-beacons"
 const POINTS_911_BEACON_LAYER_ID = "map-points-911-beacon-extrusion"
 const POINTS_CRIME_BEACONS_SOURCE_ID = "map-points-crime-beacons"
 const POINTS_CRIME_BEACON_LAYER_ID = "map-points-crime-beacon-extrusion"
+
+const POINTS_ELLIPSE_SOURCE_ID = "map-points-ellipses"
+const POINTS_ELLIPSE_LAYER_ID = "map-points-ellipses-fill"
+const POINTS_ELLIPSE_LAYER_UNIT_ID = "map-points-ellipses-fill-unit"
+const POINTS_ELLIPSE_LAYER_SELECTED_ID = "map-points-ellipses-fill-selected"
+const POINTS_ELLIPSE_LAYER_SELECTED_UNIT_ID = "map-points-ellipses-fill-selected-unit"
+const POINTS_ELLIPSE_LAYER_911_ID = "map-points-ellipses-fill-911"
+const POINTS_ELLIPSE_LAYER_SELECTED_911_ID = "map-points-ellipses-fill-selected-911"
+const PITCH_ELLIPSE_THRESHOLD_DEG = 5
 
 const FILTER_UNIT: maplibregl.FilterSpecification = [
   "any",
@@ -143,6 +233,7 @@ export function SFMap({
   const popupRef = useRef<maplibregl.Popup | null>(null)
   const pointsRef = useRef<MapPoint[]>(points)
   const selectedPointIdRef = useRef<string | null>(selectedPointId)
+  const pitchRef = useRef<number>(0)
   const [pointsLayerReady, setPointsLayerReady] = useState(false)
   pointsRef.current = points
   selectedPointIdRef.current = selectedPointId
@@ -229,14 +320,14 @@ export function SFMap({
         "circle-stroke-width": [
           "case",
           ["==", ["get", "type"], "911"],
-          3,
-          ["case", ["==", ["get", "type"], "crime"], 2.5, 1.8],
+          0,
+          ["case", ["==", ["get", "type"], "crime"], 0, 1.8],
         ],
         "circle-stroke-color": [
           "case",
           ["==", ["get", "type"], "911"],
-          MAP_POINT_911_STROKE_COLOR,
-          ["case", ["==", ["get", "type"], "crime"], CRIME_POINT_STROKE_COLOR, MAP_POINT_OUTLINE_COLOR],
+          "transparent",
+          ["case", ["==", ["get", "type"], "crime"], "transparent", MAP_POINT_OUTLINE_COLOR],
         ],
         "circle-opacity": ["case", ["get", "disabled"], 0.4, 0.98],
       }
@@ -323,13 +414,87 @@ export function SFMap({
         } as CirclePaint,
       })
 
+      // Ellipse (oval) layers for 3D perspective — shown when pitch > threshold
+      const pitch = map.getPitch()
+      map.addSource(POINTS_ELLIPSE_SOURCE_ID, {
+        type: "geojson",
+        data: pointsToEllipseGeoJSON(withSelection, map.getZoom(), pitch, selectedPointIdRef.current ?? null),
+      })
+      const ellipsePaintBase = {
+        "fill-color": paintBase["circle-color"],
+        "fill-opacity": paintBase["circle-opacity"],
+        "fill-outline-color": paintBase["circle-stroke-color"],
+      } as maplibregl.FillLayerSpecification["paint"]
+      const ellipseVisibility = pitch > PITCH_ELLIPSE_THRESHOLD_DEG ? "visible" : "none"
+      const circleVisibility = pitch > PITCH_ELLIPSE_THRESHOLD_DEG ? "none" : "visible"
+
+      map.addLayer({
+        id: POINTS_ELLIPSE_LAYER_ID,
+        type: "fill",
+        source: POINTS_ELLIPSE_SOURCE_ID,
+        filter: filterUnselectedCrime,
+        paint: ellipsePaintBase,
+        layout: { visibility: ellipseVisibility },
+      })
+      map.addLayer({
+        id: POINTS_ELLIPSE_LAYER_UNIT_ID,
+        type: "fill",
+        source: POINTS_ELLIPSE_SOURCE_ID,
+        filter: filterUnselectedUnit,
+        paint: ellipsePaintBase,
+        layout: { visibility: ellipseVisibility },
+      })
+      map.addLayer({
+        id: POINTS_ELLIPSE_LAYER_SELECTED_ID,
+        type: "fill",
+        source: POINTS_ELLIPSE_SOURCE_ID,
+        filter: filterSelectedCrime,
+        paint: ellipsePaintBase,
+        layout: { visibility: ellipseVisibility },
+      })
+      map.addLayer({
+        id: POINTS_ELLIPSE_LAYER_SELECTED_UNIT_ID,
+        type: "fill",
+        source: POINTS_ELLIPSE_SOURCE_ID,
+        filter: filterSelectedUnit,
+        paint: ellipsePaintBase,
+        layout: { visibility: ellipseVisibility },
+      })
+      map.addLayer({
+        id: POINTS_ELLIPSE_LAYER_911_ID,
+        type: "fill",
+        source: POINTS_ELLIPSE_SOURCE_ID,
+        filter: filterUnselected911,
+        paint: ellipsePaintBase,
+        layout: { visibility: ellipseVisibility },
+      })
+      map.addLayer({
+        id: POINTS_ELLIPSE_LAYER_SELECTED_911_ID,
+        type: "fill",
+        source: POINTS_ELLIPSE_SOURCE_ID,
+        filter: filterSelected911,
+        paint: ellipsePaintBase,
+        layout: { visibility: ellipseVisibility },
+      })
+
+      // Keep circles visible when flat, hidden when pitched
+      map.setLayoutProperty(POINTS_LAYER_ID, "visibility", circleVisibility)
+      map.setLayoutProperty(POINTS_LAYER_UNIT_ID, "visibility", circleVisibility)
+      map.setLayoutProperty(POINTS_LAYER_SELECTED_ID, "visibility", circleVisibility)
+      map.setLayoutProperty(POINTS_LAYER_SELECTED_UNIT_ID, "visibility", circleVisibility)
+      map.setLayoutProperty(POINTS_LAYER_911_ID, "visibility", circleVisibility)
+      map.setLayoutProperty(POINTS_LAYER_SELECTED_911_ID, "visibility", circleVisibility)
+
       setPointsLayerReady(true)
 
-      // 911 vertical beacon (fill-extrusion, visible in 3D/tilted view); skip if unsupported
+      const zoom = map.getZoom()
+      const r = radiusAtZoom(CRIME_POINT_RADIUS_BY_ZOOM, zoom)
+
+      // 911 vertical beacon (fill-extrusion, cylindrical pillar in 3D); skip if unsupported
       try {
         map.addSource(POINTS_911_BEACONS_SOURCE_ID, {
           type: "geojson",
-          data: points911ToBeaconGeoJSON(pointsRef.current ?? []),
+          data: points911ToBeaconGeoJSON(pointsRef.current ?? [], zoom, r),
         })
         map.addLayer({
           id: POINTS_911_BEACON_LAYER_ID,
@@ -346,11 +511,11 @@ export function SFMap({
         // fill-extrusion may be unsupported in some environments; circles still work
       }
 
-      // Crime vertical beacons (smaller, height 500m); skip if unsupported
+      // Crime vertical beacons (cylindrical pillars, height 500m); skip if unsupported
       try {
         map.addSource(POINTS_CRIME_BEACONS_SOURCE_ID, {
           type: "geojson",
-          data: pointsCrimeToBeaconGeoJSON(pointsRef.current ?? []),
+          data: pointsCrimeToBeaconGeoJSON(pointsRef.current ?? [], zoom, r),
         })
         map.addLayer({
           id: POINTS_CRIME_BEACON_LAYER_ID,
@@ -392,11 +557,98 @@ export function SFMap({
     }))
     source.setData(pointsToGeoJSON(withSelection))
 
+    const zoom = map.getZoom()
+    const r = radiusAtZoom(CRIME_POINT_RADIUS_BY_ZOOM, zoom)
+
     const beaconSource = map.getSource(POINTS_911_BEACONS_SOURCE_ID) as maplibregl.GeoJSONSource
-    if (beaconSource) beaconSource.setData(points911ToBeaconGeoJSON(points))
+    if (beaconSource) beaconSource.setData(points911ToBeaconGeoJSON(points, zoom, r))
     const crimeBeaconSource = map.getSource(POINTS_CRIME_BEACONS_SOURCE_ID) as maplibregl.GeoJSONSource
-    if (crimeBeaconSource) crimeBeaconSource.setData(pointsCrimeToBeaconGeoJSON(points))
+    if (crimeBeaconSource) crimeBeaconSource.setData(pointsCrimeToBeaconGeoJSON(points, zoom, r))
+
+    if (pitchRef.current > PITCH_ELLIPSE_THRESHOLD_DEG) {
+      const ellipseSource = map.getSource(POINTS_ELLIPSE_SOURCE_ID) as maplibregl.GeoJSONSource
+      if (ellipseSource) ellipseSource.setData(pointsToEllipseGeoJSON(points, zoom, pitchRef.current, selectedPointId))
+    }
   }, [points, selectedPointId])
+
+  // Refresh beacon footprint when zoom or center changes so it matches circle radius
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !pointsLayerReady) return
+
+    const refreshBeaconSize = () => {
+      const beaconSource = map.getSource(POINTS_911_BEACONS_SOURCE_ID) as maplibregl.GeoJSONSource
+      const crimeBeaconSource = map.getSource(POINTS_CRIME_BEACONS_SOURCE_ID) as maplibregl.GeoJSONSource
+      if (!beaconSource && !crimeBeaconSource) return
+
+      const zoom = map.getZoom()
+      const r = radiusAtZoom(CRIME_POINT_RADIUS_BY_ZOOM, zoom)
+      const pts = pointsRef.current ?? []
+
+      if (beaconSource) beaconSource.setData(points911ToBeaconGeoJSON(pts, zoom, r))
+      if (crimeBeaconSource) crimeBeaconSource.setData(pointsCrimeToBeaconGeoJSON(pts, zoom, r))
+    }
+
+    map.on("zoomend", refreshBeaconSize)
+    map.on("moveend", refreshBeaconSize)
+    return () => {
+      map.off("zoomend", refreshBeaconSize)
+      map.off("moveend", refreshBeaconSize)
+    }
+  }, [pointsLayerReady])
+
+  // When pitch/zoom changes: update ellipse data and switch circle vs ellipse visibility (3D = ovals)
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !pointsLayerReady) return
+
+    const updatePitchAndEllipses = () => {
+      const pitch = map.getPitch()
+      pitchRef.current = pitch
+      const zoom = map.getZoom()
+      const pts = pointsRef.current ?? []
+      const sel = selectedPointIdRef.current ?? null
+      const ellipseSource = map.getSource(POINTS_ELLIPSE_SOURCE_ID) as maplibregl.GeoJSONSource
+      if (!ellipseSource) return
+
+      ellipseSource.setData(pointsToEllipseGeoJSON(pts, zoom, pitch, sel))
+
+      const useEllipses = pitch > PITCH_ELLIPSE_THRESHOLD_DEG
+      const ellipseVis = useEllipses ? "visible" : "none"
+      const circleVis = useEllipses ? "none" : "visible"
+
+      for (const id of [
+        POINTS_LAYER_ID,
+        POINTS_LAYER_UNIT_ID,
+        POINTS_LAYER_SELECTED_ID,
+        POINTS_LAYER_SELECTED_UNIT_ID,
+        POINTS_LAYER_911_ID,
+        POINTS_LAYER_SELECTED_911_ID,
+      ]) {
+        if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", circleVis)
+      }
+      for (const id of [
+        POINTS_ELLIPSE_LAYER_ID,
+        POINTS_ELLIPSE_LAYER_UNIT_ID,
+        POINTS_ELLIPSE_LAYER_SELECTED_ID,
+        POINTS_ELLIPSE_LAYER_SELECTED_UNIT_ID,
+        POINTS_ELLIPSE_LAYER_911_ID,
+        POINTS_ELLIPSE_LAYER_SELECTED_911_ID,
+      ]) {
+        if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", ellipseVis)
+      }
+    }
+
+    map.on("move", updatePitchAndEllipses)
+    map.on("moveend", updatePitchAndEllipses)
+    map.on("pitchend", updatePitchAndEllipses)
+    updatePitchAndEllipses()
+    return () => {
+      map.off("move", updatePitchAndEllipses)
+      map.off("moveend", updatePitchAndEllipses)
+      map.off("pitchend", updatePitchAndEllipses)
+    }
+  }, [pointsLayerReady])
 
   const showPopup = useCallback(
     (point: MapPoint, lngLat: [number, number]) => {
@@ -498,7 +750,20 @@ export function SFMap({
     const handleClick = (e: maplibregl.MapMouseEvent) => {
       if (!map.getLayer(POINTS_LAYER_ID)) return
       const features = map.queryRenderedFeatures(e.point, {
-        layers: [POINTS_LAYER_ID, POINTS_LAYER_UNIT_ID, POINTS_LAYER_SELECTED_ID, POINTS_LAYER_SELECTED_UNIT_ID, POINTS_LAYER_911_ID, POINTS_LAYER_SELECTED_911_ID],
+        layers: [
+          POINTS_LAYER_ID,
+          POINTS_LAYER_UNIT_ID,
+          POINTS_LAYER_SELECTED_ID,
+          POINTS_LAYER_SELECTED_UNIT_ID,
+          POINTS_LAYER_911_ID,
+          POINTS_LAYER_SELECTED_911_ID,
+          POINTS_ELLIPSE_LAYER_ID,
+          POINTS_ELLIPSE_LAYER_UNIT_ID,
+          POINTS_ELLIPSE_LAYER_SELECTED_ID,
+          POINTS_ELLIPSE_LAYER_SELECTED_UNIT_ID,
+          POINTS_ELLIPSE_LAYER_911_ID,
+          POINTS_ELLIPSE_LAYER_SELECTED_911_ID,
+        ],
       })
       if (features.length === 0) return
       const feature = features[0]
@@ -525,7 +790,20 @@ export function SFMap({
     const handleMouseMove = (e: maplibregl.MapMouseEvent) => {
       if (!map.getLayer(POINTS_LAYER_ID)) return
       const features = map.queryRenderedFeatures(e.point, {
-        layers: [POINTS_LAYER_ID, POINTS_LAYER_UNIT_ID, POINTS_LAYER_SELECTED_ID, POINTS_LAYER_SELECTED_UNIT_ID, POINTS_LAYER_911_ID, POINTS_LAYER_SELECTED_911_ID],
+        layers: [
+          POINTS_LAYER_ID,
+          POINTS_LAYER_UNIT_ID,
+          POINTS_LAYER_SELECTED_ID,
+          POINTS_LAYER_SELECTED_UNIT_ID,
+          POINTS_LAYER_911_ID,
+          POINTS_LAYER_SELECTED_911_ID,
+          POINTS_ELLIPSE_LAYER_ID,
+          POINTS_ELLIPSE_LAYER_UNIT_ID,
+          POINTS_ELLIPSE_LAYER_SELECTED_ID,
+          POINTS_ELLIPSE_LAYER_SELECTED_UNIT_ID,
+          POINTS_ELLIPSE_LAYER_911_ID,
+          POINTS_ELLIPSE_LAYER_SELECTED_911_ID,
+        ],
       })
       map.getCanvas().style.cursor = features.length > 0 ? "pointer" : ""
     }
