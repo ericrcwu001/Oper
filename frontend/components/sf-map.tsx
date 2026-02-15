@@ -1131,7 +1131,10 @@ export function SFMap({
       const layers = POINTS_QUERY_LAYER_IDS.filter((id) => map.getLayer(id))
       if (layers.length === 0) return
       const features = map.queryRenderedFeatures(e.point, { layers })
-      if (features.length === 0) return
+      if (features.length === 0) {
+        onSelectPoint(null)
+        return
+      }
       const feature = features[0]
       const id = feature.properties?.id as string | undefined
       if (!id) return

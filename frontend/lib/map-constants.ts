@@ -151,8 +151,8 @@ export const MAP_LABEL_ZOOM_CRIME_BY_PRIORITY: Record<number, number> = {
 /** Units require more zoom to reduce clutter. */
 export const MAP_LABEL_ZOOM_UNITS = 15
 
-/** Vehicle route line (A* path to crime when vehicle is selected and en route). */
-export const MAP_ROUTE_LINE_COLOR = "#A78BFA"
+/** Vehicle route line (A* path to crime when vehicle is selected and en route). Semi-transparent blue. */
+export const MAP_ROUTE_LINE_COLOR = "#3B82F880"
 export const MAP_ROUTE_LINE_WIDTH = 3
 
 /**
