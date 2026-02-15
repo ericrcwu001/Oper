@@ -31,8 +31,11 @@ import {
   MAP_POINT_UNIT_IDLE_RADIUS_SCALE,
   MAP_LABEL_ZOOM_911,
   MAP_LABEL_ZOOM_UNITS,
+  MAP_ROUTE_LINE_COLOR,
+  MAP_ROUTE_LINE_WIDTH,
 } from "@/lib/map-constants"
 import { getSFMapStyle } from "@/lib/map-style"
+import { fetchRoute } from "@/lib/api"
 
 let protocolRegistered = false
 function ensurePmtilesProtocol() {
@@ -315,6 +318,9 @@ const POINTS_LABELS_LAYER_911_ID = "map-points-labels-911"
 const POINTS_LABELS_LAYER_CRIME_ID = "map-points-labels-crime"
 const POINTS_LABELS_LAYER_UNITS_ID = "map-points-labels-units"
 
+const VEHICLE_ROUTE_SOURCE_ID = "vehicle-route-source"
+const VEHICLE_ROUTE_LAYER_ID = "vehicle-route-layer"
+
 const POINTS_ELLIPSE_SOURCE_ID = "map-points-ellipses"
 const POINTS_ELLIPSE_LAYER_ID = "map-points-ellipses-fill"
 const POINTS_ELLIPSE_LAYER_UNIT_ID = "map-points-ellipses-fill-unit"
@@ -354,6 +360,27 @@ const FILTER_UNIT: maplibregl.FilterSpecification = [
 const FILTER_CRIME: maplibregl.FilterSpecification = ["==", ["get", "type"], "crime"]
 const FILTER_911: maplibregl.FilterSpecification = ["==", ["get", "type"], "911"]
 
+/** Trim path so only the segment from current vehicle position to end is shown (path "disappears behind" vehicle). */
+function trimPathFromVehicle(
+  coords: [number, number][],
+  vehicleLng: number,
+  vehicleLat: number
+): [number, number][] {
+  if (coords.length === 0) return []
+  if (coords.length === 1) return [[vehicleLng, vehicleLat], coords[0]]
+  let bestIdx = 0
+  let bestDist = Infinity
+  for (let i = 0; i < coords.length; i++) {
+    const [lng, lat] = coords[i]
+    const d = (lng - vehicleLng) ** 2 + (lat - vehicleLat) ** 2
+    if (d < bestDist) {
+      bestDist = d
+      bestIdx = i
+    }
+  }
+  return [[vehicleLng, vehicleLat], ...coords.slice(bestIdx)]
+}
+
 export interface SFMapProps {
   points: MapPoint[]
   selectedPointId?: string | null
@@ -378,7 +405,6 @@ export function SFMap({
 }: SFMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
-  const popupRef = useRef<maplibregl.Popup | null>(null)
   const pointsRef = useRef<MapPoint[]>(points)
   const selectedPointIdRef = useRef<string | null>(selectedPointId)
   const pitchRef = useRef<number>(0)
@@ -386,6 +412,8 @@ export function SFMap({
   const lastFlyToRef = useRef<{ lat: number; lng: number } | null>(null)
   const onFlyToCompleteRef = useRef(onFlyToComplete)
   onFlyToCompleteRef.current = onFlyToComplete
+  const routeCoordsRef = useRef<[number, number][] | null>(null)
+  const routeCacheKeyRef = useRef<string | null>(null)
   const [pointsLayerReady, setPointsLayerReady] = useState(false)
   const [pointsVersion, setPointsVersion] = useState(0)
   if (pointsRef.current !== points) {
@@ -418,10 +446,6 @@ export function SFMap({
 
     return () => {
       setPointsLayerReady(false)
-      if (popupRef.current) {
-        popupRef.current.remove()
-        popupRef.current = null
-      }
       map.remove()
       mapRef.current = null
     }
@@ -510,6 +534,20 @@ export function SFMap({
       map.addSource(POINTS_SOURCE_ID, {
         type: "geojson",
         data: pointsToGeoJSON(withSelection),
+      })
+
+      map.addSource(VEHICLE_ROUTE_SOURCE_ID, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      })
+      map.addLayer({
+        id: VEHICLE_ROUTE_LAYER_ID,
+        type: "line",
+        source: VEHICLE_ROUTE_SOURCE_ID,
+        paint: {
+          "line-color": MAP_ROUTE_LINE_COLOR,
+          "line-width": MAP_ROUTE_LINE_WIDTH,
+        },
       })
 
       const paintBase = {
@@ -917,6 +955,78 @@ export function SFMap({
     if (labelsSource) labelsSource.setData(pointsToLabelsGeoJSON(points))
   }, [pointsVersion, selectedPointId])
 
+  // Vehicle route line: when selected point is an en-route unit with target, fetch A* route once and show path trimmed from current position (path disappears behind vehicle).
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !pointsLayerReady) return
+
+    const routeSource = map.getSource(VEHICLE_ROUTE_SOURCE_ID) as maplibregl.GeoJSONSource
+    if (!routeSource) return
+
+    const pts = pointsRef.current ?? []
+    const selId = selectedPointIdRef.current
+    const selected = selId ? pts.find((p) => p.id === selId) : null
+    const isUnit =
+      selected &&
+      (selected.type === "police" || selected.type === "fire" || selected.type === "ambulance")
+    const enRoute = isUnit && (selected.status === 1 || selected.status === true)
+    const hasTarget =
+      isUnit &&
+      selected &&
+      typeof selected.targetLat === "number" &&
+      typeof selected.targetLng === "number"
+
+    if (!isUnit || !enRoute || !hasTarget || !selected) {
+      routeSource.setData({ type: "FeatureCollection", features: [] })
+      routeCoordsRef.current = null
+      routeCacheKeyRef.current = null
+      return
+    }
+
+    const target = { lat: selected.targetLat!, lng: selected.targetLng! }
+    const cacheKey = `${selected.id}:${target.lat}:${target.lng}`
+
+    const setRouteData = (coords: [number, number][]) => {
+      const vehicle = pointsRef.current?.find((p) => p.id === selectedPointIdRef.current)
+      if (!vehicle || vehicle.lng == null || vehicle.lat == null) return
+      const trimmed = trimPathFromVehicle(coords, vehicle.lng, vehicle.lat)
+      if (trimmed.length < 2) return
+      routeSource.setData({
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            geometry: { type: "LineString", coordinates: trimmed },
+            properties: {},
+          },
+        ],
+      })
+    }
+
+    if (routeCoordsRef.current != null && routeCacheKeyRef.current === cacheKey) {
+      setRouteData(routeCoordsRef.current)
+      return
+    }
+
+    const vehicleIdForFetch = selected.id
+    fetchRoute(
+      { lat: selected.lat, lng: selected.lng },
+      target,
+      selected.type as "police" | "fire" | "ambulance"
+    ).then((result) => {
+      if (!result?.coords?.length) {
+        routeCoordsRef.current = null
+        routeCacheKeyRef.current = null
+        routeSource.setData({ type: "FeatureCollection", features: [] })
+        return
+      }
+      if (selectedPointIdRef.current !== vehicleIdForFetch) return
+      routeCoordsRef.current = result.coords
+      routeCacheKeyRef.current = cacheKey
+      setRouteData(result.coords)
+    })
+  }, [pointsVersion, selectedPointId, pointsLayerReady])
+
   // Refresh beacon footprint when zoom or center changes so it matches circle radius
   useEffect(() => {
     const map = mapRef.current
@@ -1011,99 +1121,7 @@ export function SFMap({
     }
   }, [pointsLayerReady])
 
-  const showPopup = useCallback(
-    (point: MapPoint, lngLat: [number, number]) => {
-      const map = mapRef.current
-      if (!map) return
-
-      if (popupRef.current) {
-        popupRef.current.remove()
-        popupRef.current = null
-      }
-
-      const is911 = point.type === "911"
-      const isCrime = point.type === "crime"
-      const title = is911
-        ? "911 Call"
-        : point.type === "police"
-          ? "Police Unit"
-          : point.type === "fire"
-            ? "Fire Unit"
-            : point.type === "ambulance"
-              ? "Ambulance"
-              : isCrime
-                ? "Crime"
-                : "Marker"
-
-      const fields: { label: string; value?: string }[] = is911
-        ? [
-            { label: "Location", value: point.location },
-            { label: "Description", value: point.description },
-            { label: "Caller ID", value: point.callerId },
-            { label: "Caller name", value: point.callerName },
-            { label: "Time received", value: point.timestamp },
-          ]
-        : isCrime
-          ? [
-              { label: "Category", value: point.location },
-              { label: "Address", value: point.description },
-              { label: "Details", value: point.callerId },
-            ].filter((f) => f.value && !isUnknownOrEmpty(f.value))
-          : [
-              { label: "Location", value: point.location },
-              { label: "Officer in charge", value: point.officerInCharge },
-              { label: "Unit ID", value: point.unitId },
-              {
-                label: "Status",
-                value:
-                  typeof point.status === "string"
-                    ? point.status
-                    : point.status === 1 || point.status === true
-                      ? "En route"
-                      : point.status === 0 || point.status === false
-                        ? "Idle"
-                        : "Unknown",
-              },
-            ]
-
-      const content = document.createElement("div")
-      content.className = "min-w-[200px]"
-      content.innerHTML = `
-        <div class="rounded-lg border border-border bg-card text-card-foreground shadow-sm overflow-hidden">
-          <div class="px-3 py-2 border-b border-border bg-muted/50">
-            <span class="text-sm font-semibold text-foreground">${title}</span>
-          </div>
-          <div class="p-3 space-y-1.5 text-sm">
-            ${fields
-              .filter((f) => f.value != null && f.value !== "")
-              .map(
-                (f) =>
-                  `<div><span class="text-muted-foreground">${f.label}:</span> <span class="text-foreground">${escapeHtml(f.value!)}</span></div>`
-              )
-              .join("")}
-          </div>
-        </div>
-      `
-
-      const popup = new maplibregl.Popup({
-        closeButton: true,
-        closeOnClick: false,
-        className: "sf-map-popup",
-      })
-        .setLngLat(lngLat)
-        .setDOMContent(content)
-        .addTo(map)
-
-      popup.on("close", () => {
-        onSelectPoint?.(null)
-      })
-
-      popupRef.current = popup
-    },
-    [onSelectPoint]
-  )
-
-  // Map click: query point, call onSelectPoint, show popup (only after points layer exists)
+  // Map click: query point, call onSelectPoint (only after points layer exists)
   useEffect(() => {
     const map = mapRef.current
     if (!map || !onSelectPoint || !pointsLayerReady) return
@@ -1119,17 +1137,13 @@ export function SFMap({
       if (!id) return
 
       onSelectPoint(id)
-
-      const pts = pointsRef.current
-      const point = pts.find((p) => p.id === id)
-      if (point) showPopup(point, [point.lng, point.lat])
     }
 
     map.on("click", handleClick)
     return () => {
       map.off("click", handleClick)
     }
-  }, [pointsLayerReady, pointsVersion, onSelectPoint, showPopup])
+  }, [pointsLayerReady, pointsVersion, onSelectPoint])
 
   // Cursor on hover (only after points layer exists)
   useEffect(() => {
@@ -1153,8 +1167,3 @@ export function SFMap({
   return <div ref={containerRef} className={className ?? "w-full h-full"} />
 }
 
-function escapeHtml(s: string): string {
-  const div = document.createElement("div")
-  div.textContent = s
-  return div.innerHTML
-}

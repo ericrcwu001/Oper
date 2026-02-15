@@ -1475,7 +1475,7 @@ export default function LiveSimulationPage({
                   </span>
                   <span className="flex items-center gap-1.5">
                     <span className="h-2.5 w-2.5 rounded-full bg-[#F97316]" aria-hidden />
-                    Fire
+                    Firetruck
                   </span>
                   <span className="flex items-center gap-1.5">
                     <span className="h-2.5 w-2.5 rounded-full bg-[#22C55E]" aria-hidden />

@@ -126,6 +126,41 @@ export async function postCrimesForSteering(
   })
 }
 
+export interface RouteResponse {
+  coords: [number, number][]
+  distanceM: number
+  etaSec: number
+}
+
+/**
+ * Fetch A* route from point to point (GET /api/route). For vehicle path display.
+ * Returns null if no route found or on error.
+ */
+export async function fetchRoute(
+  from: { lat: number; lng: number },
+  to: { lat: number; lng: number },
+  vehicleType?: string
+): Promise<RouteResponse | null> {
+  const params = new URLSearchParams({
+    fromLat: String(from.lat),
+    fromLng: String(from.lng),
+    toLat: String(to.lat),
+    toLng: String(to.lng),
+  })
+  if (vehicleType && ["police", "fire", "ambulance"].includes(vehicleType)) {
+    params.set("vehicleType", vehicleType)
+  }
+  const res = await fetch(`${API_BASE}/api/route?${params}`)
+  if (!res.ok) return null
+  const data = await res.json()
+  if (!data?.coords || !Array.isArray(data.coords)) return null
+  return {
+    coords: data.coords,
+    distanceM: data.distanceM ?? 0,
+    etaSec: data.etaSec ?? 0,
+  }
+}
+
 export async function generateScenario(
   difficulty: "easy" | "medium" | "hard"
 ): Promise<GeneratedScenarioPayload> {

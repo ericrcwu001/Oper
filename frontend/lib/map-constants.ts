@@ -151,6 +151,10 @@ export const MAP_LABEL_ZOOM_CRIME_BY_PRIORITY: Record<number, number> = {
 /** Units require more zoom to reduce clutter. */
 export const MAP_LABEL_ZOOM_UNITS = 15
 
+/** Vehicle route line (A* path to crime when vehicle is selected and en route). */
+export const MAP_ROUTE_LINE_COLOR = "#A78BFA"
+export const MAP_ROUTE_LINE_WIDTH = 3
+
 /**
  * PMTiles URL for vector basemap. Prefer local copy at /tiles/sf.pmtiles (see frontend/public/tiles/).
  * Fallback: build channel (see frontend/docs/PROTOMAPS_SETUP.md). For production, host your own copy.

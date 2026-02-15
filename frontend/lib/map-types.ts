@@ -39,6 +39,9 @@ export interface MapPoint {
   unitId?: string
   /** 0 = idle, 1 = en route (or boolean for legacy) */
   status?: 0 | 1 | boolean
+  /** When en route: target location (from backend). Used to fetch and draw route. */
+  targetLat?: number
+  targetLng?: number
   /** Optional scale for circle radius (e.g. 1.5 for pop-in effect). */
   radiusScale?: number
   /** True when this unit is among the closest available (resource allocation); show highlight on map. */
