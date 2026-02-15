@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, useMemo, use } from "react"
+import { useState, useEffect, useRef, useMemo, useCallback, use } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { AppShell } from "@/components/app-shell"
 import { TranscriptFeed } from "@/components/transcript-feed"
@@ -53,7 +53,7 @@ import type {
 } from "@/lib/types"
 import type { MapPoint } from "@/lib/map-types"
 import { SFMap } from "@/components/sf-map"
-import { cn } from "@/lib/utils"
+import { cn, splitIntoPhraseChunks } from "@/lib/utils"
 import {
   SIM_SECONDS_PER_TICK,
   CRIME_RESOLVE_RADIUS_DEG,
@@ -61,6 +61,9 @@ import {
   SIM_SECONDS_AT_SCENE_TO_RESOLVE,
   CRIME_SIM_CLOCK_SPEEDUP,
 } from "@/lib/simulation-constants"
+
+/** Delay (ms) before each phrase chunk is revealed during TTS playback. */
+const CHUNK_REVEAL_DELAY_MS = 350
 
 const UNKNOWN = "Unknown"
 
@@ -472,6 +475,8 @@ export default function LiveSimulationPage({
     police?: string | null
     fire?: string | null
   } | null>(null)
+  /** Last visible chunk index for active caller turn (progressive transcript reveal). */
+  const [activeCallerVisibleChunks, setActiveCallerVisibleChunks] = useState(-1)
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const tick30Ref = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -489,6 +494,11 @@ export default function LiveSimulationPage({
     const t = setTimeout(() => setLoading(false), 1200)
     return () => clearTimeout(t)
   }, [])
+
+  // Reset chunk visibility when new caller audio loads
+  useEffect(() => {
+    setActiveCallerVisibleChunks(-1)
+  }, [callerAudioUrl])
 
   // Fetch SF crimes for simulation day (one day from CSV, configurable speed playback)
   useEffect(() => {
@@ -556,6 +566,31 @@ export default function LiveSimulationPage({
     ]
   )
   current911PointRef.current = current911Point
+
+  /** Last caller turn (currently playing) for progressive transcript reveal. */
+  const activeCallerTurn = useMemo(() => {
+    const callers = transcript.filter((t) => t.speaker === "caller")
+    return callers[callers.length - 1] ?? null
+  }, [transcript])
+
+  const activeCallerChunks = useMemo(
+    () => (activeCallerTurn ? splitIntoPhraseChunks(activeCallerTurn.text) : []),
+    [activeCallerTurn]
+  )
+
+  const handleAudioTimeUpdate = useCallback(
+    (currentTime: number, duration: number) => {
+      if (activeCallerChunks.length === 0 || duration <= 0) return
+      const delaySec = CHUNK_REVEAL_DELAY_MS / 1000
+      let visibleUpTo = -1
+      for (let i = 0; i < activeCallerChunks.length; i++) {
+        const chunkStart = (i / activeCallerChunks.length) * duration
+        if (currentTime >= chunkStart + delaySec) visibleUpTo = i
+      }
+      setActiveCallerVisibleChunks(visibleUpTo)
+    },
+    [activeCallerChunks]
+  )
 
   // Keep the 911 map point in sync with scenario + revealed caller info
   useEffect(() => {
@@ -1225,7 +1260,17 @@ export default function LiveSimulationPage({
                 </p>
               </CardHeader>
               <div className="min-h-0 flex-1 overflow-hidden">
-                <TranscriptFeed turns={transcript} partialText={partialText} />
+                <TranscriptFeed
+                  turns={transcript}
+                  partialText={partialText}
+                  activeCallerTurnId={callerAudioUrl ? activeCallerTurn?.id : undefined}
+                  activeCallerChunks={
+                    callerAudioUrl && activeCallerChunks.length > 0 ? activeCallerChunks : undefined
+                  }
+                  activeCallerVisibleUpTo={
+                    callerAudioUrl && activeCallerChunks.length > 0 ? activeCallerVisibleChunks : undefined
+                  }
+                />
               </div>
             </Card>
 
@@ -1237,7 +1282,12 @@ export default function LiveSimulationPage({
                   <CardContent className="flex flex-col gap-2 py-2 px-3 sm:flex-row sm:items-center sm:gap-4 sm:flex-wrap">
                     <div className="flex items-center gap-2 min-w-0">
                       <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground shrink-0 w-14">Caller</span>
-                      <AudioControl audioUrl={callerAudioUrl} disabled={!callActive} compact />
+                      <AudioControl
+                        audioUrl={callerAudioUrl}
+                        disabled={!callActive}
+                        onTimeUpdate={handleAudioTimeUpdate}
+                        compact
+                      />
                     </div>
                     <div className="flex items-center gap-2 min-w-0 border-t pt-2 sm:border-t-0 sm:pt-0 sm:border-l sm:pl-4">
                       <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground shrink-0 w-10">Mic</span>

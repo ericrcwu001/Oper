@@ -378,7 +378,7 @@ export function SFMap({
       lastFlyToRef.current = null
       onFlyToCompleteRef.current?.()
     }
-    const durationMs = 3000
+    const durationMs = 2000
     let startTime: number | null = null
     let startLng: number | null = null
     let startLat: number | null = null
