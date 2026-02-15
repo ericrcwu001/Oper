@@ -49,6 +49,7 @@ function pointsToGeoJSON(points: MapPoint[]): GeoJSON.FeatureCollection {
         disabled: p.disabled ?? false,
         radiusScale: p.radiusScale ?? 1,
         recommended: p.recommended ?? false,
+        status: p.status === true,
       },
     })),
   }
@@ -149,6 +150,7 @@ function pointsToEllipseGeoJSON(
         type: p.type,
         selected: selected,
         disabled: p.disabled ?? false,
+        status: p.status === true,
       },
     }
   })
@@ -332,7 +334,7 @@ export function SFMap({
           "case",
           ["==", ["get", "type"], "911"],
           0,
-          ["case", ["==", ["get", "type"], "crime"], 0, 1.8],
+          ["case", ["==", ["get", "type"], "crime"], 0, ["case", ["==", ["get", "status"], true], 0.8, 2.5]],
         ],
         "circle-stroke-color": [
           "case",
@@ -340,7 +342,14 @@ export function SFMap({
           "transparent",
           ["case", ["==", ["get", "type"], "crime"], "transparent", MAP_POINT_OUTLINE_COLOR],
         ],
-        "circle-opacity": ["case", ["get", "disabled"], 0.4, 0.98],
+        "circle-opacity": [
+          "case",
+          ["get", "disabled"],
+          0.4,
+          ["all", ["in", ["get", "type"], ["literal", ["police", "fire", "ambulance"]]], ["==", ["get", "status"], true]],
+          0.45,
+          0.98,
+        ],
       }
 
       type CirclePaint = maplibregl.CircleLayerSpecification["paint"]
