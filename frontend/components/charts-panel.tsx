@@ -14,6 +14,19 @@ import {
 } from "recharts"
 import type { Session } from "@/lib/types"
 
+/* Terminal palette for charts (matches globals.css) */
+const CHART = {
+  grid: "hsl(222, 12%, 14%)",
+  tick: "hsl(120, 4%, 52%)",
+  primary: "hsl(168, 100%, 42%)",
+  accent: "hsl(135, 100%, 45%)",
+  warning: "hsl(42, 100%, 50%)",
+  destructive: "hsl(0, 85%, 55%)",
+  tooltipBg: "hsl(222, 20%, 6%)",
+  tooltipBorder: "hsl(222, 12%, 14%)",
+  tooltipText: "hsl(120, 6%, 88%)",
+}
+
 interface ChartsPanelProps {
   sessions: Session[]
 }
@@ -54,48 +67,44 @@ export function ChartsPanel({ sessions }: ChartsPanelProps) {
     <div className="flex flex-col gap-6">
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Score trend */}
-        <Card className="border bg-card">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Score Trend</CardTitle>
+        <Card className="border border-border bg-card">
+          <CardHeader className="border-b border-border py-2 px-4">
+            <CardTitle className="text-xs font-medium">Score Trend</CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={240}>
+            <ResponsiveContainer width="100%" height={220}>
               <LineChart data={scoreData}>
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke="hsl(220 15% 18%)"
-                />
+                <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} />
                 <XAxis
                   dataKey="name"
-                  tick={{ fill: "hsl(220 10% 55%)", fontSize: 12 }}
-                  axisLine={{ stroke: "hsl(220 15% 18%)" }}
+                  tick={{ fill: CHART.tick, fontSize: 11 }}
+                  axisLine={{ stroke: CHART.grid }}
                 />
                 <YAxis
                   domain={[0, 100]}
-                  tick={{ fill: "hsl(220 10% 55%)", fontSize: 12 }}
-                  axisLine={{ stroke: "hsl(220 15% 18%)" }}
+                  tick={{ fill: CHART.tick, fontSize: 11 }}
+                  axisLine={{ stroke: CHART.grid }}
                 />
                 <Tooltip
                   contentStyle={{
-                    backgroundColor: "hsl(220 20% 10%)",
-                    border: "1px solid hsl(220 15% 18%)",
-                    borderRadius: "8px",
-                    color: "hsl(220 10% 93%)",
-                    fontSize: 12,
+                    backgroundColor: CHART.tooltipBg,
+                    border: `1px solid ${CHART.tooltipBorder}`,
+                    color: CHART.tooltipText,
+                    fontSize: 11,
                   }}
                 />
                 <Line
                   type="monotone"
                   dataKey="score"
-                  stroke="hsl(210 100% 55%)"
+                  stroke={CHART.primary}
                   strokeWidth={2}
-                  dot={{ r: 4, fill: "hsl(210 100% 55%)" }}
+                  dot={{ r: 3, fill: CHART.primary }}
                   name="Overall"
                 />
                 <Line
                   type="monotone"
                   dataKey="protocol"
-                  stroke="hsl(160 70% 42%)"
+                  stroke={CHART.accent}
                   strokeWidth={1.5}
                   strokeDasharray="4 4"
                   dot={false}
@@ -107,9 +116,9 @@ export function ChartsPanel({ sessions }: ChartsPanelProps) {
         </Card>
 
         {/* Missed actions frequency */}
-        <Card className="border bg-card">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Missed Actions Frequency</CardTitle>
+        <Card className="border border-border bg-card">
+          <CardHeader className="border-b border-border py-2 px-4">
+            <CardTitle className="text-xs font-medium">Missed Actions Frequency</CardTitle>
           </CardHeader>
           <CardContent>
             {missedData.length === 0 ? (
@@ -117,41 +126,31 @@ export function ChartsPanel({ sessions }: ChartsPanelProps) {
                 No missed actions recorded.
               </div>
             ) : (
-              <ResponsiveContainer width="100%" height={240}>
+              <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={missedData} layout="vertical">
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke="hsl(220 15% 18%)"
-                    horizontal={false}
-                  />
+                  <CartesianGrid strokeDasharray="3 3" stroke={CHART.grid} horizontal={false} />
                   <XAxis
                     type="number"
-                    tick={{ fill: "hsl(220 10% 55%)", fontSize: 12 }}
-                    axisLine={{ stroke: "hsl(220 15% 18%)" }}
+                    tick={{ fill: CHART.tick, fontSize: 11 }}
+                    axisLine={{ stroke: CHART.grid }}
                     allowDecimals={false}
                   />
                   <YAxis
                     dataKey="name"
                     type="category"
-                    width={160}
-                    tick={{ fill: "hsl(220 10% 55%)", fontSize: 10 }}
-                    axisLine={{ stroke: "hsl(220 15% 18%)" }}
+                    width={140}
+                    tick={{ fill: CHART.tick, fontSize: 10 }}
+                    axisLine={{ stroke: CHART.grid }}
                   />
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: "hsl(220 20% 10%)",
-                      border: "1px solid hsl(220 15% 18%)",
-                      borderRadius: "8px",
-                      color: "hsl(220 10% 93%)",
-                      fontSize: 12,
+                      backgroundColor: CHART.tooltipBg,
+                      border: `1px solid ${CHART.tooltipBorder}`,
+                      color: CHART.tooltipText,
+                      fontSize: 11,
                     }}
                   />
-                  <Bar
-                    dataKey="count"
-                    fill="hsl(0 72% 51%)"
-                    radius={[0, 4, 4, 0]}
-                    name="Occurrences"
-                  />
+                  <Bar dataKey="count" fill={CHART.destructive} radius={0} name="Occurrences" />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -160,16 +159,16 @@ export function ChartsPanel({ sessions }: ChartsPanelProps) {
       </div>
 
       {/* Top recurring improvements */}
-      <Card className="border bg-card">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Top Recurring Improvements</CardTitle>
+      <Card className="border border-border bg-card">
+        <CardHeader className="border-b border-border py-2 px-4">
+          <CardTitle className="text-xs font-medium">Top Recurring Improvements</CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="flex flex-col gap-2">
+        <CardContent className="p-4">
+          <div className="flex flex-col gap-1.5">
             {topImprovements.map(([feedback, count], i) => (
               <div
                 key={i}
-                className="flex items-start justify-between gap-4 rounded-md border bg-muted/50 px-3 py-2"
+                className="flex items-start justify-between gap-4 border border-border bg-muted/50 px-3 py-2"
               >
                 <p className="text-sm text-foreground">{feedback}</p>
                 <span className="shrink-0 font-mono text-xs text-muted-foreground">

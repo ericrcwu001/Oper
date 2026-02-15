@@ -1,7 +1,16 @@
 "use client"
 
 import { useState, useEffect, useRef, useMemo, useCallback, use } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams, usePathname } from "next/navigation"
+import { useDispatch, useSelector } from "react-redux"
+import { useSidebarTabs } from "@/context/sidebar-tabs-context"
+import {
+  startCall as reduxStartCall,
+  updateCallState as reduxUpdateCallState,
+  setCallConnectionStatus as reduxSetConnectionStatus,
+  endCall as reduxEndCall,
+} from "@/store/slices/callSlice"
+import type { RootState } from "@/store"
 import { AppShell } from "@/components/app-shell"
 import { TranscriptFeed } from "@/components/transcript-feed"
 import { MicControl } from "@/components/mic-control"
@@ -341,7 +350,11 @@ export default function LiveSimulationPage({
 }) {
   const { sessionId } = use(params)
   const router = useRouter()
+  const pathname = usePathname()
   const searchParams = useSearchParams()
+  const { addTab } = useSidebarTabs()
+  const dispatch = useDispatch()
+  const reduxCall = useSelector((s: RootState) => s.call)
   const scenarioIdFromUrl = searchParams.get("scenario")
   const hintsEnabled = searchParams.get("hints") === "true"
   const selectedDifficulty = (searchParams.get("difficulty") as Difficulty) || "medium"
@@ -359,6 +372,7 @@ export default function LiveSimulationPage({
   } | null>(null)
   const scenarioCallLocationRef = useRef<typeof scenarioCallLocation>(null)
   const current911PointRef = useRef<MapPoint>(DEFAULT_911_POINT)
+  const highlightedVehicleIdsRef = useRef<string[]>([])
 
   useEffect(() => {
     try {
@@ -486,18 +500,146 @@ export default function LiveSimulationPage({
   const tick30Ref = useRef<ReturnType<typeof setInterval> | null>(null)
   const angleRef = useRef(0)
   const crimeSimSecondsRef = useRef(0)
+  const autoStartAttemptedRef = useRef(false)
   const crimesFromApiRef = useRef<CrimeRecord[]>([])
   crimeSimSecondsRef.current = crimeSimSeconds
   crimesFromApiRef.current = crimesFromApi
   mapPointsRef.current = mapPoints
   crimeResolvedIdsRef.current = crimeResolvedIds
   crimeProximitySecondsRef.current = crimeProximitySeconds
+  highlightedVehicleIdsRef.current = highlightedVehicleIds
 
-  // Simulated loading
+  // Simulated loading (skip delay when auto-starting from dashboard)
   useEffect(() => {
+    if (searchParams.get("autoStart") === "1") {
+      setLoading(false)
+      return
+    }
     const t = setTimeout(() => setLoading(false), 1200)
     return () => clearTimeout(t)
-  }, [])
+  }, [searchParams])
+
+  // Restore call state on mount: prefer Redux (source of truth for active call), then sessionStorage fallback.
+  const hasRestoredRef = useRef(false)
+  useEffect(() => {
+    if (!sessionId || typeof window === "undefined") return
+    if (hasRestoredRef.current) return
+    hasRestoredRef.current = true
+    if (reduxCall.callActive && reduxCall.sessionId === sessionId) {
+      setTranscript(reduxCall.transcript)
+      setConversationHistory(reduxCall.conversationHistory)
+      setNotes(reduxCall.notes)
+      setCallActive(true)
+      setConnectionStatus(reduxCall.connectionStatus)
+      setCallSeconds(reduxCall.callSeconds)
+      setLastCallerResponseSeconds(reduxCall.lastCallerResponseSeconds)
+      autoStartAttemptedRef.current = true
+      return
+    }
+    const keyT = `simulation-transcript-${sessionId}`
+    const keyN = `simulation-notes-${sessionId}`
+    const rawT = sessionStorage.getItem(keyT)
+    const rawN = sessionStorage.getItem(keyN)
+    if (!rawT && !rawN) return
+    try {
+      if (rawT) {
+        const parsed = JSON.parse(rawT) as TranscriptTurn[]
+        if (Array.isArray(parsed)) {
+          setTranscript(parsed)
+          setConversationHistory(
+            parsed.map((t) => ({ role: t.speaker, content: t.text }))
+          )
+          const lastCaller = [...parsed].reverse().find((t) => t.speaker === "caller")
+          if (lastCaller != null) setLastCallerResponseSeconds(lastCaller.timestamp)
+        }
+      }
+      if (rawN) {
+        const parsed = JSON.parse(rawN) as NoteEntry[]
+        if (Array.isArray(parsed)) setNotes(parsed)
+      }
+    } catch {
+      // ignore
+    }
+  }, [sessionId, reduxCall.callActive, reduxCall.sessionId, reduxCall.transcript, reduxCall.conversationHistory, reduxCall.notes, reduxCall.connectionStatus, reduxCall.callSeconds, reduxCall.lastCallerResponseSeconds])
+
+  // Keep a ref of latest transcript/notes so we can persist on unmount (e.g. when user navigates away)
+  const transcriptNotesRef = useRef({ transcript, notes })
+  useEffect(() => {
+    transcriptNotesRef.current = { transcript, notes }
+  }, [transcript, notes])
+
+  // Persist transcript and notes during the call and on unmount when user navigates away
+  const isFirstPersistRef = useRef(true)
+  useEffect(() => {
+    if (!sessionId || typeof window === "undefined") return
+    if (isFirstPersistRef.current) {
+      isFirstPersistRef.current = false
+      return
+    }
+    try {
+      sessionStorage.setItem(
+        `simulation-transcript-${sessionId}`,
+        JSON.stringify(transcript)
+      )
+      sessionStorage.setItem(
+        `simulation-notes-${sessionId}`,
+        JSON.stringify(notes)
+      )
+    } catch {
+      // ignore
+    }
+  }, [sessionId, transcript, notes])
+
+  // On unmount (navigate away), persist latest state so it's there when they come back.
+  // Only write when we have content so we never overwrite good stored data with [] (e.g. Strict Mode unmount before restore applied).
+  useEffect(() => {
+    if (!sessionId) return
+    return () => {
+      if (typeof window === "undefined") return
+      const { transcript: t, notes: n } = transcriptNotesRef.current
+      const hasContent =
+        (Array.isArray(t) && t.length > 0) || (Array.isArray(n) && n.length > 0)
+      if (!hasContent) return
+      try {
+        sessionStorage.setItem(
+          `simulation-transcript-${sessionId}`,
+          JSON.stringify(t)
+        )
+        sessionStorage.setItem(
+          `simulation-notes-${sessionId}`,
+          JSON.stringify(n)
+        )
+      } catch {
+        // ignore
+      }
+    }
+  }, [sessionId])
+
+  // Reset restore flag on unmount so remount (e.g. Strict Mode or navigating back) runs restore again.
+  useEffect(() => {
+    if (!sessionId) return
+    return () => {
+      hasRestoredRef.current = false
+    }
+  }, [sessionId])
+
+  // Sync call state to Redux so sidebar and remount see "call is active" and can restore.
+  useEffect(() => {
+    if (!callActive || !sessionId || reduxCall.sessionId !== sessionId) return
+    dispatch(
+      reduxUpdateCallState({
+        transcript,
+        conversationHistory,
+        notes,
+        callSeconds,
+        lastCallerResponseSeconds,
+      })
+    )
+  }, [callActive, sessionId, reduxCall.sessionId, transcript, conversationHistory, notes, callSeconds, lastCallerResponseSeconds, dispatch])
+  useEffect(() => {
+    if (reduxCall.sessionId !== sessionId) return
+    dispatch(reduxSetConnectionStatus(connectionStatus))
+  }, [connectionStatus, sessionId, reduxCall.sessionId, dispatch])
 
   // Classify transcript → short incident label (caller words only, no scenario context)
   useEffect(() => {
@@ -664,13 +806,22 @@ export default function LiveSimulationPage({
     return () => clearInterval(id)
   }, [])
 
-  // Poll backend vehicles every 1s; send active crimes so backend steers vehicles toward them (real movement).
+  // Poll backend vehicles every 1s; send crimes + 911 dispatch target so highlighted vehicles head toward the call.
   useEffect(() => {
     const POLL_MS = 1000
     const poll = async () => {
       try {
         const crimesForBackend = crimePointsRef.current.map((p) => ({ lat: p.lat, lng: p.lng }))
-        await postCrimesForSteering(crimesForBackend).catch(() => {})
+        const callPoint = current911PointRef.current
+        const dispatchTarget =
+          callPoint?.type === "911"
+            ? { lat: callPoint.lat, lng: callPoint.lng }
+            : undefined
+        const dispatchVehicleIds = highlightedVehicleIdsRef.current
+        await postCrimesForSteering(crimesForBackend, {
+          dispatchTarget,
+          dispatchVehicleIds: dispatchVehicleIds.length > 0 ? dispatchVehicleIds : undefined,
+        }).catch(() => {})
         const vehicles = await fetchVehicles()
         if (vehicles.length > 0) {
           const base = [current911PointRef.current, ...vehicles] as MapPoint[]
@@ -914,6 +1065,20 @@ export default function LiveSimulationPage({
       setCallActive(true)
       setConnectionStatus("connected")
       setCallSeconds(0)
+      const initialTranscript = [
+        { id: `t-${Date.now()}`, timestamp: 0, speaker: "caller" as const, text: data.transcript },
+      ]
+      const href = searchParams.toString() ? `${pathname}?${searchParams.toString()}` : pathname
+      dispatch(
+        reduxStartCall({
+          sessionId,
+          label: scenario.title,
+          href,
+          transcript: initialTranscript,
+          conversationHistory: [{ role: "caller", content: data.transcript }],
+          notes: [],
+        })
+      )
       // Pan and zoom map to 911 call point
       const loc =
         scenarioCallLocation ??
@@ -933,6 +1098,36 @@ export default function LiveSimulationPage({
     }
   }
 
+  // When arriving from dashboard "Start call", auto-start the call once scenario is ready.
+  // Skip if Redux says this session already has an active call, or saved transcript in sessionStorage.
+  useEffect(() => {
+    if (autoStartAttemptedRef.current) return
+    if (searchParams.get("autoStart") !== "1") return
+    if (loading || connectionStatus !== "disconnected" || callActive) return
+    if (reduxCall.callActive && reduxCall.sessionId === sessionId) {
+      autoStartAttemptedRef.current = true
+      return
+    }
+    const isGenerated = scenarioIdFromUrl === "generated"
+    if (isGenerated && !scenarioPayload) return
+    if (typeof window !== "undefined") {
+      const saved = sessionStorage.getItem(`simulation-transcript-${sessionId}`)
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved)
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            autoStartAttemptedRef.current = true
+            return
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+    autoStartAttemptedRef.current = true
+    handleStartCall()
+  }, [loading, scenarioPayload, scenarioIdFromUrl, connectionStatus, callActive, searchParams, sessionId, reduxCall.callActive, reduxCall.sessionId])
+
   const handleEndCall = () => {
     setCallActive(false)
     setConnectionStatus("disconnected")
@@ -942,6 +1137,7 @@ export default function LiveSimulationPage({
     setDispatchRecommendation(null)
     setHighlightedVehicleIds([])
     setClosestVehicleByType(null)
+    dispatch(reduxEndCall())
     try {
       sessionStorage.setItem(
         `simulation-transcript-${sessionId}`,
@@ -954,8 +1150,14 @@ export default function LiveSimulationPage({
     } catch {
       // ignore storage errors
     }
-    // Redirect immediately so user sees review/loading page; don't wait for save
-    router.push(`/simulation/${sessionId}/review?scenario=${scenarioId}`)
+    const reviewHref = `/simulation/${sessionId}/review?scenario=${scenarioId}`
+    addTab({
+      id: `feedback-${sessionId}`,
+      label: scenario.title,
+      href: reviewHref,
+      type: "feedback",
+    })
+    router.push(reviewHref)
     const endedAt = new Date().toISOString()
     const startedAt = new Date(Date.now() - callSeconds * 1000).toISOString()
     saveSimulation(sessionId, {
@@ -1284,13 +1486,14 @@ export default function LiveSimulationPage({
 
           {/* Right half — 4 components: transcript (top), then bottom split = controls + dispatch | notes */}
           <div className="flex min-h-[320px] min-w-0 flex-1 flex-col gap-3 lg:min-h-0">
-            {/* Top half: Live transcription (greatest priority, full width) */}
+            {/* Live transcription: caller audio top-right, transcript middle, mic bottom */}
             <Card className="flex min-h-0 flex-1 flex-col overflow-hidden border bg-card min-w-0">
-              <CardHeader className="shrink-0 border-b py-2.5">
+              <CardHeader className="shrink-0 border-b py-2.5 flex flex-row items-center justify-between gap-3">
                 <CardTitle className="text-sm font-medium">Live transcription</CardTitle>
-                <p className="text-xs text-muted-foreground">
-                  Caller and operator — scroll to see full conversation
-                </p>
+                <div className="flex items-center gap-2 min-w-0 shrink-0">
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Caller</span>
+                  <AudioControl audioUrl={callerAudioUrl} disabled={!callActive} onTimeUpdate={handleAudioTimeUpdate} compact />
+                </div>
               </CardHeader>
               <div className="min-h-0 flex-1 overflow-hidden">
                 <TranscriptFeed
@@ -1305,35 +1508,21 @@ export default function LiveSimulationPage({
                   }
                 />
               </div>
+              <div className="shrink-0 border-t flex flex-row flex-nowrap items-center gap-1 py-2 px-3">
+                <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground shrink-0 w-8">Mic</span>
+                <MicControl
+                  disabled={!callActive}
+                  onRecordingComplete={handleVoiceRecordingComplete}
+                  sending={apiLoading}
+                  compact
+                />
+              </div>
             </Card>
 
-            {/* Bottom half: split — (Controls + Dispatch) | Notes */}
+            {/* Bottom half: split — Dispatch | Notes */}
             <div className="flex shrink-0 flex-col gap-2 lg:flex-row lg:min-h-0">
-              {/* Left: User controls (mic + level) then Dispatch */}
               <div className="flex min-w-0 flex-1 flex-col gap-2 overflow-y-auto lg:min-h-0 lg:max-w-[55%]">
-                <Card className="shrink-0 border bg-card">
-                  <CardContent className="flex flex-col gap-2 py-2 px-3 sm:flex-row sm:items-center sm:gap-4 sm:flex-wrap">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground shrink-0 w-14">Caller</span>
-                      <AudioControl
-                        audioUrl={callerAudioUrl}
-                        disabled={!callActive}
-                        onTimeUpdate={handleAudioTimeUpdate}
-                        compact
-                      />
-                    </div>
-                    <div className="flex items-center gap-2 min-w-0 border-t pt-2 sm:border-t-0 sm:pt-0 sm:border-l sm:pl-4">
-                      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground shrink-0 w-10">Mic</span>
-                      <MicControl
-                        disabled={!callActive}
-                        onRecordingComplete={handleVoiceRecordingComplete}
-                        sending={apiLoading}
-                        compact
-                      />
-                    </div>
-                  </CardContent>
-                </Card>
-                {/* Dispatch recommendations underneath controls */}
+                {/* Dispatch recommendations */}
             <Card
               className={cn(
                 "shrink-0 border bg-card transition-all relative overflow-hidden",
@@ -1448,7 +1637,7 @@ export default function LiveSimulationPage({
                         {dispatchRecommendation.critical && " (critical)"}
                       </span>
                     </p>
-                    <ul className="list-inside list-disc space-y-1 text-xs">
+                    <ul className="list-none space-y-1 text-xs">
                       {dispatchRecommendation.units.map((u, i) => {
                         const vehicleId = (() => {
                           const simType = unitTypeToSimType(u.unit)

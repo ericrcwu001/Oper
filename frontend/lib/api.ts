@@ -102,15 +102,27 @@ export async function fetchVehicles(): Promise<MapPoint[]> {
 }
 
 /**
- * Send active crime locations so backend can steer vehicles toward them (real movement along roads).
+ * Send active crime locations and optional 911 dispatch target so backend steers vehicles.
+ * Highlighted vehicle IDs (purple) are steered toward dispatchTarget when provided.
  */
 export async function postCrimesForSteering(
-  crimes: { lat: number; lng: number }[]
+  crimes: { lat: number; lng: number }[],
+  options?: {
+    dispatchTarget?: { lat: number; lng: number }
+    dispatchVehicleIds?: string[]
+  }
 ): Promise<void> {
+  const body: {
+    crimes: { lat: number; lng: number }[]
+    dispatchTarget?: { lat: number; lng: number }
+    dispatchVehicleIds?: string[]
+  } = { crimes }
+  if (options?.dispatchTarget) body.dispatchTarget = options.dispatchTarget
+  if (options?.dispatchVehicleIds?.length) body.dispatchVehicleIds = options.dispatchVehicleIds
   await fetch(`${API_BASE}/api/vehicles/crimes`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ crimes }),
+    body: JSON.stringify(body),
   })
 }
 

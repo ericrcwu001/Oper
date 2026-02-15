@@ -1,25 +1,27 @@
 import type { Metadata, Viewport } from "next"
-import { Geist, Geist_Mono } from "next/font/google"
+import { JetBrains_Mono } from "next/font/google"
 
+import { siteConfig } from "@/lib/site-config"
+import { Providers } from "@/components/providers"
 import "./globals.css"
 
-const geistSans = Geist({
+const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
-  variable: "--font-geist-sans",
-})
-const geistMono = Geist_Mono({
-  subsets: ["latin"],
-  variable: "--font-geist-mono",
+  variable: "--font-terminal",
+  display: "swap",
 })
 
 export const metadata: Metadata = {
-  title: "911Sim - Operator Training Simulator",
+  title: `${siteConfig.siteName} - Operator Training Simulator`,
   description:
     "Realistic 911 call training simulator with live-call practice, note-taking, scoring, and trainer dashboard.",
+  icons: {
+    icon: siteConfig.favicon,
+  },
 }
 
 export const viewport: Viewport = {
-  themeColor: "#0a0f1a",
+  themeColor: "#0c0c0e",
   width: "device-width",
   initialScale: 1,
 }
@@ -32,9 +34,12 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}
+        className={`${jetbrainsMono.variable} font-mono antialiased text-sm`}
+        style={{
+          fontFamily: "var(--font-terminal), ui-monospace, 'SF Mono', Monaco, 'Cascadia Mono', 'Segoe UI Mono', 'Roboto Mono', Consolas, monospace",
+        }}
       >
-        {children}
+        <Providers>{children}</Providers>
       </body>
     </html>
   )

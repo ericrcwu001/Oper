@@ -106,6 +106,7 @@ export async function getSimulations(): Promise<{
     .select("*")
     .eq("user_id", user.id)
     .order("created_at", { ascending: false })
+    .limit(500)
   if (error) return { data: [], error }
   return { data: (data ?? []) as SimulationRow[], error: null }
 }
