@@ -230,12 +230,15 @@ export interface Evaluation {
 /**
  * Evaluate operator performance from transcript and notes (POST /evaluate).
  * scenarioTimeline: optional map of seconds (string keys) to event descriptions for this scenario.
+ * expectedActions, criticalInfo: optional rubric for strict, rubric-based scoring.
  */
 export async function evaluateCall(
   transcript: { speaker: string; text: string; timestamp?: number }[],
   notes: { text: string; tag?: string; timestamp?: number }[],
   scenarioDescription: string,
-  scenarioTimeline?: Record<string, string>
+  scenarioTimeline?: Record<string, string>,
+  expectedActions?: string[],
+  criticalInfo?: string[]
 ): Promise<Evaluation> {
   const body: Record<string, unknown> = {
     transcript,
@@ -244,6 +247,12 @@ export async function evaluateCall(
   }
   if (scenarioTimeline != null && Object.keys(scenarioTimeline).length > 0) {
     body.scenarioTimeline = scenarioTimeline
+  }
+  if (expectedActions != null && Array.isArray(expectedActions) && expectedActions.length > 0) {
+    body.expectedActions = expectedActions
+  }
+  if (criticalInfo != null && Array.isArray(criticalInfo) && criticalInfo.length > 0) {
+    body.criticalInfo = criticalInfo
   }
   const res = await fetch(`${API_BASE}/evaluate`, {
     method: "POST",
@@ -337,6 +346,23 @@ export async function fetchClosestVehicles(incidentLocation: {
   return res.json() as Promise<ClosestVehiclesResponse>
 }
 
+/**
+ * Classify transcript into a short incident-type label (from caller words only).
+ * POST /api/call-evaluation/classify-transcript
+ */
+export async function classifyTranscript(transcript: string): Promise<{ label: string }> {
+  const res = await fetch(`${API_BASE}/api/call-evaluation/classify-transcript`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ transcript }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error((err as { error?: string }).error ?? "Classification failed")
+  }
+  return res.json() as Promise<{ label: string }>
+}
+
 /** One crime from GET /api/crimes (SF CSV, time-ordered for 3x sim). */
 export interface CrimeRecord {
   id: string
@@ -346,6 +372,8 @@ export interface CrimeRecord {
   category?: string
   address?: string
   description?: string
+  displayLabel?: string
+  isUnknown?: boolean
 }
 
 /**

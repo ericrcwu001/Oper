@@ -4,6 +4,7 @@
  */
 
 import fs from 'fs/promises';
+import { classifyCrime } from './crimeClassificationService.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -89,7 +90,7 @@ async function loadCsvRows() {
 /**
  * Get crimes for a single day, sorted by time.
  * @param {string} date - YYYY-MM-DD
- * @returns {Promise<Array<{ id: string, lat: number, lng: number, simSecondsFromMidnight: number, category?: string, address?: string }>>}
+ * @returns {Promise<Array<{ id: string, lat: number, lng: number, simSecondsFromMidnight: number, category?: string, address?: string, description?: string, displayLabel: string, isUnknown: boolean }>>}
  */
 export async function getCrimesForDay(date) {
   const rows = await loadCsvRows();
@@ -97,15 +98,23 @@ export async function getCrimesForDay(date) {
   const dayRows = rows.filter((r) => r.date === normalized);
   dayRows.sort((a, b) => a.secondsFromMidnight - b.secondsFromMidnight);
 
-  return dayRows.map((r, i) => ({
-    id: `crime-${normalized}-${i}-${r.secondsFromMidnight}`,
-    lat: r.lat,
-    lng: r.lng,
-    simSecondsFromMidnight: r.secondsFromMidnight,
-    category: r.category,
-    address: r.address,
-    description: r.descript,
-  }));
+  return dayRows.map((r, i) => {
+    const { displayLabel, isUnknown } = classifyCrime({
+      category: r.category,
+      description: r.descript,
+    });
+    return {
+      id: `crime-${normalized}-${i}-${r.secondsFromMidnight}`,
+      lat: r.lat,
+      lng: r.lng,
+      simSecondsFromMidnight: r.secondsFromMidnight,
+      category: r.category,
+      address: r.address,
+      description: r.descript,
+      displayLabel,
+      isUnknown,
+    };
+  });
 }
 
 /**

@@ -58,6 +58,13 @@ function pointsToGeoJSON(points: MapPoint[]): GeoJSON.FeatureCollection {
   }
 }
 
+/** Skip label values that are empty or UNKNOWN. */
+function isUnknownOrEmpty(val: string | undefined): boolean {
+  if (val == null || val.trim() === "") return true
+  const v = val.trim().toUpperCase()
+  return v === "UNKNOWN"
+}
+
 /** Same fields as popup, formatted as plain multi-line text for inline labels. */
 function getPointLabelText(point: MapPoint): string {
   const coords = `(${point.lng.toFixed(4)}, ${point.lat.toFixed(4)})`
@@ -93,8 +100,21 @@ function getPointLabelText(point: MapPoint): string {
                     : "Unknown",
           },
         ]
+  // Crime: prefer displayLabel (point.label) when present; add Address if useful
+  if (isCrime && point.label && !isUnknownOrEmpty(point.label)) {
+    const parts = [point.label]
+    if (point.description && !isUnknownOrEmpty(point.description)) {
+      parts.push(point.description)
+    }
+    const lines = parts.map((v) => `[${v}]`).join("\n")
+    return `${coords}\n${lines}`
+  }
+  // 911: prefer short incident label from transcript classifier when present
+  if (is911 && point.label && !isUnknownOrEmpty(point.label)) {
+    return `${coords}\n[${point.label}]`
+  }
   const fieldLines = fields
-    .filter((f) => f.value != null && f.value !== "")
+    .filter((f) => f.value != null && f.value !== "" && !isUnknownOrEmpty(f.value))
     .map((f) => `[${f.value}]`)
     .join("\n")
   return fieldLines ? `[${coords}]\n${fieldLines}` : `[${coords}]`
@@ -912,18 +932,18 @@ export function SFMap({
 
       const fields: { label: string; value?: string }[] = is911
         ? [
-            { label: "Location", value: point.location ?? "Unknown" },
-            { label: "Description", value: point.description ?? "Unknown" },
-            { label: "Caller ID", value: point.callerId ?? "—" },
-            { label: "Caller name", value: point.callerName ?? "Unknown" },
-            { label: "Time received", value: point.timestamp ?? "—" },
+            { label: "Location", value: point.location },
+            { label: "Description", value: point.description },
+            { label: "Caller ID", value: point.callerId },
+            { label: "Caller name", value: point.callerName },
+            { label: "Time received", value: point.timestamp },
           ]
         : isCrime
           ? [
               { label: "Category", value: point.location },
               { label: "Address", value: point.description },
               { label: "Details", value: point.callerId },
-            ]
+            ].filter((f) => f.value && !isUnknownOrEmpty(f.value))
           : [
               { label: "Location", value: point.location },
               { label: "Officer in charge", value: point.officerInCharge },

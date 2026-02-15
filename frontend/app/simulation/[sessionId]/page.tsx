@@ -38,6 +38,7 @@ import {
   fetchCrimesDay,
   fetchVehicles,
   postCrimesForSteering,
+  classifyTranscript,
   type GeneratedScenarioPayload,
   type CallScenarioInput,
   type CrimeRecord,
@@ -65,8 +66,6 @@ import {
 /** Delay (ms) before each phrase chunk is revealed during TTS playback. */
 const CHUNK_REVEAL_DELAY_MS = 350
 
-const UNKNOWN = "Unknown"
-
 /** Default 911 call point (used when no scenario location). */
 const DEFAULT_911_POINT: MapPoint = {
   id: "call-1",
@@ -82,7 +81,7 @@ const DEFAULT_911_POINT: MapPoint = {
 
 /**
  * Infer what 911 info the caller has revealed from the conversation.
- * Returns which fields to show (revealed value or UNKNOWN) for the map popup.
+ * Returns which fields to show when revealed; empty string when not revealed.
  */
 function getRevealed911Info(
   payload: GeneratedScenarioPayload | null,
@@ -117,9 +116,9 @@ function getRevealed911Info(
       callerMessages.length >= 2)
 
   return {
-    location: noScenario ? "" : hasLocation ? loc : UNKNOWN,
-    description: noScenario ? "" : hasDescription ? description : UNKNOWN,
-    callerName: noScenario ? "" : hasName ? name : UNKNOWN,
+    location: noScenario ? "" : hasLocation ? loc : "",
+    description: noScenario ? "" : hasDescription ? description : "",
+    callerName: noScenario ? "" : hasName ? name : "",
     timestamp: "",
   }
 }
@@ -130,7 +129,8 @@ function build911MapPoint(
   scenarioCallLocation: { lat: number; lng: number; address: string } | null,
   conversationHistory: { role: string; content: string }[],
   callActive: boolean,
-  callSeconds: number
+  callSeconds: number,
+  incidentLabel?: string
 ): MapPoint {
   // Use scenario location from generator (lat/lng in structured output); prefer scenarioCallLocation then payload.scenario.location
   const fromPayload =
@@ -169,6 +169,7 @@ function build911MapPoint(
       lng: loc.lng,
       location: loc.address,
       timestamp: callActive ? timestamp : DEFAULT_911_POINT.timestamp,
+      label: incidentLabel || undefined,
     }
   }
 
@@ -179,10 +180,11 @@ function build911MapPoint(
     lat: loc.lat,
     lng: loc.lng,
     location: revealed.location || loc.address,
-    description: revealed.description || s.title || UNKNOWN,
-    callerId: "—",
-    callerName: revealed.callerName || UNKNOWN,
+    description: revealed.description || "",
+    callerId: "",
+    callerName: revealed.callerName || "",
     timestamp,
+    label: incidentLabel || undefined,
   }
 }
 
@@ -477,6 +479,8 @@ export default function LiveSimulationPage({
   } | null>(null)
   /** Last visible chunk index for active caller turn (progressive transcript reveal). */
   const [activeCallerVisibleChunks, setActiveCallerVisibleChunks] = useState(-1)
+  /** Short incident label from transcript classifier (caller words only); used for 911 map label. */
+  const [incidentLabel, setIncidentLabel] = useState<string>("")
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const tick30Ref = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -495,6 +499,25 @@ export default function LiveSimulationPage({
     return () => clearTimeout(t)
   }, [])
 
+  // Classify transcript → short incident label (caller words only, no scenario context)
+  useEffect(() => {
+    const callerText = conversationHistory
+      .filter((t) => t.role === "caller")
+      .map((t) => t.content)
+      .join(" ")
+      .trim()
+    if (!callerText) {
+      setIncidentLabel("")
+      return
+    }
+    const t = setTimeout(() => {
+      classifyTranscript(callerText)
+        .then(({ label }) => setIncidentLabel(label || ""))
+        .catch(() => setIncidentLabel(""))
+    }, 600)
+    return () => clearTimeout(t)
+  }, [conversationHistory])
+
   // Reset chunk visibility when new caller audio loads
   useEffect(() => {
     setActiveCallerVisibleChunks(-1)
@@ -512,12 +535,16 @@ export default function LiveSimulationPage({
       })
   }, [])
 
-  // Visible crimes: sim time passed and not yet resolved (resolved when enough vehicles at scene for long enough)
+  // Visible crimes: sim time passed, not yet resolved, and not UNKNOWN (hide unclassifiable labels)
   const crimeMapPoints = useMemo(() => {
     return crimesFromApi
       .filter(
         (c) =>
-          c.simSecondsFromMidnight <= crimeSimSeconds && !crimeResolvedIds.has(c.id)
+          c.simSecondsFromMidnight <= crimeSimSeconds &&
+          !crimeResolvedIds.has(c.id) &&
+          !c.isUnknown &&
+          c.displayLabel !== "UNKNOWN" &&
+          Boolean(c.category?.trim() || c.description?.trim())
       )
       .map((c) => ({
         id: c.id,
@@ -527,6 +554,7 @@ export default function LiveSimulationPage({
         location: c.category,
         description: c.address,
         callerId: c.description,
+        label: c.displayLabel,
         radiusScale: crimePopScales[c.id] ?? 1,
       }))
   }, [crimesFromApi, crimeSimSeconds, crimeResolvedIds, crimePopScales])
@@ -555,7 +583,8 @@ export default function LiveSimulationPage({
         scenarioCallLocation,
         conversationHistory,
         callActive,
-        callSeconds
+        callSeconds,
+        incidentLabel
       ),
     [
       scenarioPayload,
@@ -563,6 +592,7 @@ export default function LiveSimulationPage({
       conversationHistory,
       callActive,
       callSeconds,
+      incidentLabel,
     ]
   )
   current911PointRef.current = current911Point
@@ -935,6 +965,8 @@ export default function LiveSimulationPage({
         description: scenario.description,
         difficulty: scenario.difficulty,
         language: scenario.language,
+        criticalInfo: scenario.criticalInfo,
+        expectedActions: scenario.expectedActions,
       },
       transcript,
       notes,

@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { assessTranscriptWithLLM } from '../services/liveEvalService.js';
+import { classifyTranscript } from '../services/openaiService.js';
 import { getPositions } from '../services/vehicleSimulation.js';
 import { rankByProximityAndETA } from '../services/proximityRanking.js';
 
@@ -74,6 +75,26 @@ router.post('/assess', async (req, res) => {
       res.status(503).json({
         error: 'Live evaluation is unavailable: OPENAI_API_KEY is not set.',
       });
+      return;
+    }
+    res.status(500).json({ error: message });
+  }
+});
+
+/**
+ * POST /api/call-evaluation/classify-transcript
+ * Body: { transcript: string } — caller messages joined.
+ * Returns: { label: string } — 2–4 word incident type (ALL CAPS) from transcript ONLY.
+ */
+router.post('/classify-transcript', async (req, res) => {
+  try {
+    const transcript = typeof req.body?.transcript === 'string' ? req.body.transcript : '';
+    const label = await classifyTranscript(transcript);
+    res.json({ label });
+  } catch (e) {
+    const message = e.message || 'Classification failed';
+    if (message.includes('OPENAI_API_KEY')) {
+      res.status(503).json({ error: 'Classification unavailable: OPENAI_API_KEY not set.' });
       return;
     }
     res.status(500).json({ error: message });
