@@ -25,70 +25,19 @@ import {
   ListOrdered,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
-import { scenarios, callerScripts } from "@/lib/mock-data"
+import { scenarios } from "@/lib/mock-data"
 import { evaluateCall } from "@/lib/api"
+import { getSimulation, saveSimulation } from "@/lib/supabase/simulations"
 import type {
   TranscriptTurn,
   Evaluation,
   NoteEntry,
   TranscriptHighlight,
+  ScenarioType,
+  Language,
+  Difficulty,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
-
-// Generate a mock evaluation
-function generateEvaluation(): Evaluation {
-  return {
-    protocolAdherence: 85,
-    timeliness: 78,
-    criticalInfoCapture: 82,
-    overallScore: 82,
-    missedActions: [
-      "Did not confirm callback number",
-      "Delayed dispatch instruction",
-      "Did not ask about allergies or medication",
-    ],
-    feedbackBullets: [
-      "Good use of clear, calm language throughout the call",
-      "Remember to always confirm callback number in the first 30 seconds",
-      "Practice quicker dispatch triggers for this scenario type",
-      "Consider asking about medications early for cardiac scenarios",
-    ],
-  }
-}
-
-// Generate mock transcript for review
-function generateReviewTranscript(scenarioType: string): TranscriptTurn[] {
-  const lines = callerScripts[scenarioType] || callerScripts["cardiac-arrest"]
-  const turns: TranscriptTurn[] = []
-  const operatorResponses = [
-    "911, what is your emergency?",
-    "Can you tell me the exact address?",
-    "Is anyone injured?",
-    "Stay on the line. Help is on the way.",
-    "Can you describe what you see?",
-    "Are you in a safe location?",
-  ]
-  let ts = 0
-  for (let i = 0; i < Math.min(lines.length, 8); i++) {
-    if (i < operatorResponses.length) {
-      turns.push({
-        id: `rev-op-${i}`,
-        timestamp: ts,
-        speaker: "operator",
-        text: operatorResponses[i],
-      })
-      ts += 4
-    }
-    turns.push({
-      id: `rev-cal-${i}`,
-      timestamp: ts,
-      speaker: "caller",
-      text: lines[i],
-    })
-    ts += 5
-  }
-  return turns
-}
 
 function formatTs(sec: number) {
   const m = Math.floor(sec / 60)
@@ -147,35 +96,64 @@ export default function ReviewPage({
   }, [sessionId])
 
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null)
-  const [reviewTranscript, setReviewTranscript] = useState<TranscriptTurn[]>(
-    () => generateReviewTranscript(scenario.scenarioType)
-  )
+  const [reviewTranscript, setReviewTranscript] = useState<TranscriptTurn[]>([])
   const [searchQuery, setSearchQuery] = useState("")
   const [reviewNotes, setReviewNotes] = useState<NoteEntry[]>([])
+  const [evaluationError, setEvaluationError] = useState<string | null>(null)
 
   useEffect(() => {
-    try {
-      if (typeof window === "undefined") return
-      const rawT = sessionStorage.getItem(`simulation-transcript-${sessionId}`)
-      if (rawT) {
-        const parsed = JSON.parse(rawT) as TranscriptTurn[]
-        if (Array.isArray(parsed)) setReviewTranscript(parsed)
+    if (typeof window === "undefined") return
+    let cancelled = false
+    const load = async () => {
+      try {
+        const rawT = sessionStorage.getItem(`simulation-transcript-${sessionId}`)
+        const rawN = sessionStorage.getItem(`simulation-notes-${sessionId}`)
+        if (rawT) {
+          const parsed = JSON.parse(rawT) as TranscriptTurn[]
+          if (Array.isArray(parsed) && !cancelled) setReviewTranscript(parsed)
+        }
+        if (rawN) {
+          const parsed = JSON.parse(rawN) as NoteEntry[]
+          if (Array.isArray(parsed) && !cancelled) setReviewNotes(parsed)
+        }
+        if (!rawT || !rawN) {
+          const { data } = await getSimulation(sessionId)
+          if (cancelled || !data) return
+          if (data.data.transcript?.length) setReviewTranscript(data.data.transcript as TranscriptTurn[])
+          if (data.data.notes?.length) setReviewNotes(data.data.notes as NoteEntry[])
+          if (data.data.scenarioTimeline && typeof data.data.scenarioTimeline === "object") {
+            setScenarioTimeline(data.data.scenarioTimeline)
+          }
+          if (data.data.scenario) {
+            setScenario((prev) => ({
+              ...prev,
+              id: data.data.scenario?.id ?? prev.id,
+              scenarioType: (data.data.scenario?.scenarioType as ScenarioType) ?? prev.scenarioType,
+              title: data.data.scenario?.title ?? prev.title,
+              description: data.data.scenario?.description ?? prev.description,
+              difficulty: (data.data.scenario?.difficulty as Difficulty) ?? prev.difficulty,
+              language: (data.data.scenario?.language as Language) ?? prev.language,
+            }))
+          }
+          if (data.data.evaluation && typeof data.data.evaluation === "object") {
+            const e = data.data.evaluation as Evaluation
+            if (typeof e.overallScore === "number") setEvaluation(e)
+          }
+        }
+      } catch {
+        // ignore
       }
-      const rawN = sessionStorage.getItem(`simulation-notes-${sessionId}`)
-      if (rawN) {
-        const parsed = JSON.parse(rawN) as NoteEntry[]
-        if (Array.isArray(parsed)) setReviewNotes(parsed)
-      }
-    } catch {
-      // ignore
+    }
+    load()
+    return () => {
+      cancelled = true
     }
   }, [sessionId])
 
   useEffect(() => {
-    if (reviewTranscript.length === 0) {
-      setEvaluation(generateEvaluation())
-      return
-    }
+    if (evaluation != null) return
+    if (reviewTranscript.length === 0) return
+    setEvaluationError(null)
     let cancelled = false
     evaluateCall(
       reviewTranscript,
@@ -183,16 +161,61 @@ export default function ReviewPage({
       scenario.description || "911 emergency call",
       Object.keys(scenarioTimeline).length > 0 ? scenarioTimeline : undefined
     )
-      .then((e) => {
+      .then(async (e) => {
         if (!cancelled) setEvaluation(e)
+        const scenarioPayload = {
+          id: scenario.id,
+          scenarioType: scenario.scenarioType,
+          title: scenario.title,
+          description: scenario.description,
+          difficulty: scenario.difficulty,
+          language: scenario.language,
+        }
+        const timelinePayload =
+          Object.keys(scenarioTimeline).length > 0 ? scenarioTimeline : undefined
+        const { data: existing } = await getSimulation(sessionId)
+        const merged = {
+          ...existing?.data,
+          scenario: scenarioPayload,
+          transcript: reviewTranscript,
+          notes: reviewNotes,
+          evaluation: e,
+          scenarioTimeline: timelinePayload ?? existing?.data?.scenarioTimeline,
+        }
+        await saveSimulation(sessionId, merged)
       })
       .catch(() => {
-        if (!cancelled) setEvaluation(generateEvaluation())
+        if (!cancelled) setEvaluationError("Failed to generate feedback.")
       })
     return () => {
       cancelled = true
     }
-  }, [reviewTranscript, reviewNotes, scenario.description, scenarioTimeline])
+  }, [reviewTranscript, reviewNotes, scenario.description, scenarioTimeline, sessionId, scenario])
+
+  useEffect(() => {
+    if (!evaluation) return
+    const scenarioPayload = {
+      id: scenario.id,
+      scenarioType: scenario.scenarioType,
+      title: scenario.title,
+      description: scenario.description,
+      difficulty: scenario.difficulty,
+      language: scenario.language,
+    }
+    const timelinePayload =
+      Object.keys(scenarioTimeline).length > 0 ? scenarioTimeline : undefined
+    getSimulation(sessionId).then(({ data: existing }) => {
+      const merged = {
+        ...existing?.data,
+        scenario: scenarioPayload,
+        transcript: reviewTranscript,
+        notes: reviewNotes,
+        evaluation,
+        scenarioTimeline: timelinePayload ?? existing?.data?.scenarioTimeline,
+      }
+      saveSimulation(sessionId, merged)
+    })
+  }, [sessionId, evaluation, scenario, reviewTranscript, reviewNotes, scenarioTimeline])
 
   const filteredTranscript = searchQuery
     ? reviewTranscript.filter((t) =>
@@ -241,15 +264,21 @@ export default function ReviewPage({
           </div>
         </div>
 
+        {evaluationError && (
+          <div className="mb-6 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            {evaluationError}
+          </div>
+        )}
+
         {/* Score Cards */}
         <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {evaluation === null ? (
+          {evaluation === null && !evaluationError ? (
             <>
               {[1, 2, 3, 4].map((i) => (
                 <Skeleton key={i} className="h-[100px] rounded-lg" />
               ))}
             </>
-          ) : (
+          ) : evaluation != null ? (
             <>
               <ScoreCard
                 label="Protocol Adherence"
@@ -272,7 +301,7 @@ export default function ReviewPage({
                 icon={Award}
               />
             </>
-          )}
+          ) : null}
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
@@ -287,8 +316,14 @@ export default function ReviewPage({
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {evaluation === null ? (
-                  <Skeleton className="h-32 w-full rounded-md" />
+                {evaluation == null ? (
+                  evaluationError ? (
+                    <p className="py-4 text-center text-sm text-muted-foreground">
+                      {evaluationError}
+                    </p>
+                  ) : (
+                    <Skeleton className="h-32 w-full rounded-md" />
+                  )
                 ) : (
                   <ul className="flex flex-col gap-2">
                     {evaluation.missedActions.map((action, i) => (
@@ -319,8 +354,14 @@ export default function ReviewPage({
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {evaluation === null ? (
-                  <Skeleton className="h-32 w-full rounded-md" />
+                {evaluation == null ? (
+                  evaluationError ? (
+                    <p className="py-4 text-center text-sm text-muted-foreground">
+                      {evaluationError}
+                    </p>
+                  ) : (
+                    <Skeleton className="h-32 w-full rounded-md" />
+                  )
                 ) : (
                   <ul className="flex flex-col gap-2">
                     {evaluation.feedbackBullets.map((fb, i) => (

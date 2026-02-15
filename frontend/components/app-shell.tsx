@@ -1,11 +1,12 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
-import { Phone, LayoutDashboard, Radio, PanelLeftClose } from "lucide-react"
+import { usePathname, useRouter } from "next/navigation"
+import { Phone, LayoutDashboard, Radio, PanelLeftClose, LogOut } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { createClient } from "@/lib/supabase/client"
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -16,7 +17,29 @@ const SIDEBAR_WIDTH = "12rem" /* 192px — thin rail */
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
+  const router = useRouter()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [userEmail, setUserEmail] = useState<string | null>(null)
+
+  useEffect(() => {
+    const supabase = createClient()
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setUserEmail(user?.email ?? null)
+    })
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUserEmail(session?.user?.email ?? null)
+    })
+    return () => subscription.unsubscribe()
+  }, [])
+
+  const handleLogout = async () => {
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    router.push("/")
+    router.refresh()
+  }
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
@@ -72,6 +95,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </Link>
               )
             })}
+            <div className="mt-auto flex flex-col gap-0.5 border-t border-border/30 pt-2">
+              {userEmail && (
+                <p
+                  className="truncate px-2.5 py-1 text-xs text-muted-foreground"
+                  title={userEmail}
+                >
+                  {userEmail}
+                </p>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="flex items-center gap-2 rounded-md px-2.5 py-2 text-sm text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                onClick={handleLogout}
+              >
+                <LogOut className="h-4 w-4 shrink-0 opacity-80" />
+                <span className="truncate">Log out</span>
+              </Button>
+            </div>
           </nav>
         </div>
       </aside>

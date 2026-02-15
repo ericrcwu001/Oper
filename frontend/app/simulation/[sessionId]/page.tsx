@@ -42,6 +42,7 @@ import {
   type CallScenarioInput,
   type CrimeRecord,
 } from "@/lib/api"
+import { saveSimulation } from "@/lib/supabase/simulations"
 import type {
   TranscriptTurn,
   ConnectionStatus,
@@ -61,6 +62,8 @@ import {
   CRIME_SIM_CLOCK_SPEEDUP,
 } from "@/lib/simulation-constants"
 
+const UNKNOWN = "Unknown"
+
 /** Default 911 call point (used when no scenario location). */
 const DEFAULT_911_POINT: MapPoint = {
   id: "call-1",
@@ -72,6 +75,99 @@ const DEFAULT_911_POINT: MapPoint = {
   callerId: "CALL-001",
   callerName: "Jane Doe",
   timestamp: "14:32",
+}
+
+/**
+ * Infer what 911 info the caller has revealed from the conversation.
+ * Returns which fields to show (revealed value or UNKNOWN) for the map popup.
+ */
+function getRevealed911Info(
+  payload: GeneratedScenarioPayload | null,
+  callerMessages: string[]
+): {
+  location: string
+  description: string
+  callerName: string
+  timestamp: string
+} {
+  const callerText = callerMessages.join(" ").toLowerCase().trim()
+  const noScenario = !payload?.scenario
+  const s = payload?.scenario
+  const loc = s?.location?.address ?? ""
+  const name = s?.caller_profile?.name ?? ""
+  const title = s?.title ?? ""
+  const description = s?.description ?? title
+  const criticalInfo = s?.critical_info ?? []
+
+  const hasLocation =
+    loc &&
+    (callerText.includes(loc.toLowerCase()) ||
+      (loc.split(",")[0] && callerText.includes(loc.split(",")[0].trim().toLowerCase())))
+  const hasName =
+    name &&
+    (callerText.includes(name.toLowerCase()) ||
+      /\b(my name is|i'm|i am|this is)\s+[\w\s]+/i.test(callerText))
+  const hasDescription =
+    callerMessages.length > 0 &&
+    (callerText.includes(title.toLowerCase()) ||
+      criticalInfo.some((info) => info && callerText.includes(info.toLowerCase().slice(0, 20))) ||
+      callerMessages.length >= 2)
+
+  return {
+    location: noScenario ? "" : hasLocation ? loc : UNKNOWN,
+    description: noScenario ? "" : hasDescription ? description : UNKNOWN,
+    callerName: noScenario ? "" : hasName ? name : UNKNOWN,
+    timestamp: "",
+  }
+}
+
+/** Build the 911 map point from scenario + revealed info; used for popup and map. */
+function build911MapPoint(
+  scenarioPayload: GeneratedScenarioPayload | null,
+  scenarioCallLocation: { lat: number; lng: number; address: string } | null,
+  conversationHistory: { role: string; content: string }[],
+  callActive: boolean,
+  callSeconds: number
+): MapPoint {
+  const loc = scenarioCallLocation ?? {
+    lat: DEFAULT_911_POINT.lat,
+    lng: DEFAULT_911_POINT.lng,
+    address: DEFAULT_911_POINT.location ?? "San Francisco, CA",
+  }
+  const callerMessages = conversationHistory
+    .filter((t) => t.role === "caller")
+    .map((t) => t.content)
+  const revealed = getRevealed911Info(scenarioPayload, callerMessages)
+
+  const timestamp =
+    callActive || callSeconds > 0
+      ? callSeconds === 0
+        ? "Just now"
+        : `${formatTime(callSeconds)} ago`
+      : "—"
+
+  if (!scenarioPayload?.scenario) {
+    return {
+      ...DEFAULT_911_POINT,
+      lat: loc.lat,
+      lng: loc.lng,
+      location: loc.address,
+      timestamp: callActive ? timestamp : DEFAULT_911_POINT.timestamp,
+    }
+  }
+
+  const s = scenarioPayload.scenario
+  return {
+    id: "call-1",
+    type: "911",
+    lat: loc.lat,
+    lng: loc.lng,
+    location: revealed.location || loc.address,
+    description: revealed.description || s.title || UNKNOWN,
+    callerId: "—",
+    callerName: revealed.callerName || UNKNOWN,
+    timestamp,
+  }
 }
 
 /** Map LLM unit type to simulation vehicle type for list-click zoom. */
@@ -244,6 +340,7 @@ export default function LiveSimulationPage({
     address: string
   } | null>(null)
   const scenarioCallLocationRef = useRef<typeof scenarioCallLocation>(null)
+  const current911PointRef = useRef<MapPoint>(DEFAULT_911_POINT)
 
   useEffect(() => {
     try {
@@ -275,17 +372,6 @@ export default function LiveSimulationPage({
       setScenarioCallLocation(null)
     }
   }, [scenarioPayload])
-
-  useEffect(() => {
-    if (!scenarioCallLocation) return
-    setMapPoints((prev) =>
-      prev.map((p) =>
-        p.id === "call-1" && p.type === "911"
-          ? { ...p, lat: scenarioCallLocation.lat, lng: scenarioCallLocation.lng, location: scenarioCallLocation.address }
-          : p
-      )
-    )
-  }, [scenarioCallLocation])
 
   const scenarioForApi: CallScenarioInput =
     scenarioPayload ?? buildScenarioPayload(scenario, selectedDifficulty)
@@ -399,6 +485,35 @@ export default function LiveSimulationPage({
     return mapPoints.map((p) => ({ ...p, recommended: ids.has(p.id) }))
   }, [mapPoints, highlightedVehicleIds])
 
+  /** 911 call point for the map: scenario-based and updates as caller reveals info. */
+  const current911Point = useMemo(
+    () =>
+      build911MapPoint(
+        scenarioPayload,
+        scenarioCallLocation,
+        conversationHistory,
+        callActive,
+        callSeconds
+      ),
+    [
+      scenarioPayload,
+      scenarioCallLocation,
+      conversationHistory,
+      callActive,
+      callSeconds,
+    ]
+  )
+  current911PointRef.current = current911Point
+
+  // Keep the 911 map point in sync with scenario + revealed caller info
+  useEffect(() => {
+    setMapPoints((prev) =>
+      prev.map((p) =>
+        p.id === "call-1" && p.type === "911" ? current911Point : p
+      )
+    )
+  }, [current911Point])
+
   // When new crimes appear, set pop scale for pop-in effect
   useEffect(() => {
     const currentIds = new Set(crimeMapPoints.map((p) => p.id))
@@ -440,9 +555,7 @@ export default function LiveSimulationPage({
         await postCrimesForSteering(crimesForBackend).catch(() => {})
         const vehicles = await fetchVehicles()
         if (vehicles.length > 0) {
-          const initial = getInitialMapPoints(scenarioCallLocation ?? undefined)
-          const callPoint = initial.find((p) => p.type === "911")
-          const base = (callPoint ? [callPoint, ...vehicles] : vehicles) as MapPoint[]
+          const base = [current911PointRef.current, ...vehicles] as MapPoint[]
           setMapPoints([...base, ...crimePointsRef.current])
         }
         // If vehicles.length === 0, don't overwrite — keep existing mapPoints (initial or animated demo)
@@ -513,7 +626,12 @@ export default function LiveSimulationPage({
           const nonCrime = prev.filter((p) => p.type !== "crime")
           next = [...nonCrime, ...crimes]
         } else {
-          const base = getInitialMapPoints(scenarioCallLocationRef.current ?? undefined)
+          const base = [
+            current911PointRef.current,
+            ...getInitialMapPoints(scenarioCallLocationRef.current ?? undefined).filter(
+              (p) => p.type !== "911"
+            ),
+          ]
           const police = base.find((p) => p.id === "unit-p1")
           if (!police || police.type !== "police") {
             next = [...base, ...crimes]
@@ -701,7 +819,26 @@ export default function LiveSimulationPage({
     } catch {
       // ignore storage errors
     }
+    // Redirect immediately so user sees review/loading page; don't wait for save
     router.push(`/simulation/${sessionId}/review?scenario=${scenarioId}`)
+    const endedAt = new Date().toISOString()
+    const startedAt = new Date(Date.now() - callSeconds * 1000).toISOString()
+    saveSimulation(sessionId, {
+      scenario: {
+        id: scenario.id,
+        scenarioType: scenario.scenarioType,
+        title: scenario.title,
+        description: scenario.description,
+        difficulty: scenario.difficulty,
+        language: scenario.language,
+      },
+      transcript,
+      notes,
+      startedAt,
+      endedAt,
+      durationSec: callSeconds,
+      scenarioTimeline: scenarioPayload?.timeline,
+    }).catch(() => {})
   }
 
   const handleSendText = async () => {
