@@ -116,8 +116,11 @@ function pickNextEdge(g, v) {
     return;
   }
 
-  // Purple-highlighted (recommended) vehicles: always steer toward 911 dispatch target when set
+  // Dispatched vehicles: steer toward 911 (greedy next edge toward target).
   if (dispatchTarget && dispatchVehicleIds.length > 0 && dispatchVehicleIds.includes(v.id)) {
+    v.status = 1;
+    v.targetLat = dispatchTarget.lat;
+    v.targetLng = dispatchTarget.lng;
     const targetPos = [dispatchTarget.lat, dispatchTarget.lng];
     let bestEdgeIdx = incident[0];
     let bestDist = Infinity;
@@ -132,9 +135,6 @@ function pickNextEdge(g, v) {
         bestEdgeIdx = ei;
       }
     }
-    v.status = 1;
-    v.targetLat = dispatchTarget.lat;
-    v.targetLng = dispatchTarget.lng;
     const nextEdge = edges[bestEdgeIdx];
     const fromNext = nextEdge.fromNodeIdx === atNode;
     v.currentEdge = bestEdgeIdx;

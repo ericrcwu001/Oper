@@ -46,6 +46,8 @@ export interface MapPoint {
   radiusScale?: number
   /** True when this unit is among the closest available (resource allocation); show highlight on map. */
   recommended?: boolean
+  /** True when this unit has been dispatched to 911 (show en-route ring instead of recommended). */
+  enRoute?: boolean
   /** Crime priority 1–5: used for beacon height and label min-zoom (higher = taller beacon, label visible when more zoomed out). */
   priority?: number
 }

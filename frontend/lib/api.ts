@@ -432,6 +432,23 @@ export async function classifyTranscript(transcript: string): Promise<{ label: s
   return res.json() as Promise<{ label: string }>
 }
 
+/**
+ * Get a short note suggestion from the caller's latest statement (e.g. "could be stroke").
+ * POST /api/call-evaluation/note-suggestion
+ */
+export async function getNoteSuggestion(callerText: string): Promise<{ suggestion: string }> {
+  const res = await fetch(`${API_BASE}/api/call-evaluation/note-suggestion`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ callerText }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error((err as { error?: string }).error ?? "Note suggestion failed")
+  }
+  return res.json() as Promise<{ suggestion: string }>
+}
+
 /** One crime from GET /api/crimes (SF CSV, time-ordered for 3x sim). */
 export interface CrimeRecord {
   id: string

@@ -137,6 +137,9 @@ export const MAP_POINT_RECOMMENDED_RING_RADIUS_BY_ZOOM: [number, number][] = [
   [16, 8.5],
 ]
 
+/** Stroke for "en route" (dispatched to 911) unit ring. Cyan to distinguish from recommended (pink). */
+export const MAP_POINT_ENROUTE_STROKE_COLOR = "#22D3EE"
+
 /** Min zoom for inline labels: 911 and crime show earlier (more important). */
 export const MAP_LABEL_ZOOM_911 = 13
 export const MAP_LABEL_ZOOM_CRIME = 13

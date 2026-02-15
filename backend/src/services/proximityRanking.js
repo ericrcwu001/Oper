@@ -9,7 +9,8 @@ import { haversineMeters } from '../utils/geo.js';
 /** Average speed m/s per vehicle type (from vehicle simulation SPEED_BASE). */
 const SPEED_AVG = { police: 11, fire: 13, ambulance: 13 };
 
-const TOP_N_PER_TYPE = 3;
+/** Max vehicles per type to consider for ranking (LLM summary uses top 3; dispatch can request more). */
+const TOP_N_PER_TYPE = 25;
 const VEHICLE_TYPES = ['ambulance', 'police', 'fire'];
 
 /**
@@ -101,10 +102,12 @@ export function unitTypeToSimType(unit) {
  * @param {Record<string, RankedUnit[]>} byType
  * @returns {string}
  */
+const SUMMARY_TOP_PER_TYPE = 3;
+
 function buildSummaryForLLM(incidentLatLng, byType) {
   const parts = [];
   for (const t of VEHICLE_TYPES) {
-    const list = byType[t] || [];
+    const list = (byType[t] || []).slice(0, SUMMARY_TOP_PER_TYPE);
     if (list.length === 0) {
       parts.push(`${t}: none available nearby.`);
       continue;

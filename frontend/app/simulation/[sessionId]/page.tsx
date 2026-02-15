@@ -50,6 +50,7 @@ import {
   fetchVehicles,
   postCrimesForSteering,
   classifyTranscript,
+  getNoteSuggestion,
   type GeneratedScenarioPayload,
   type CallScenarioInput,
   type CrimeRecord,
@@ -465,6 +466,7 @@ export default function LiveSimulationPage({
   const [apiLoading, setApiLoading] = useState(false)
   const [apiError, setApiError] = useState<string | null>(null)
   const [notes, setNotes] = useState<NoteEntry[]>([])
+  const [noteSuggestion, setNoteSuggestion] = useState<string | null>(null)
   const [mapPoints, setMapPoints] = useState<MapPoint[]>(() => {
     try {
       const raw =
@@ -525,8 +527,15 @@ export default function LiveSimulationPage({
   const [isAssessingDispatch, setIsAssessingDispatch] = useState(false)
   /** Closest-available vehicle IDs for map highlight; updated by assess + polling so highlights stay live. */
   const [highlightedVehicleIds, setHighlightedVehicleIds] = useState<string[]>([])
+  /** When user clicks Dispatch, freeze these IDs for steering and pink highlight (en route). */
+  const [dispatchedVehicleIds, setDispatchedVehicleIds] = useState<string[] | null>(null)
   /** When set, map flies to this point (e.g. after clicking a dispatch list item). */
   const [mapFlyToTarget, setMapFlyToTarget] = useState<{ lat: number; lng: number } | null>(null)
+  /** When set, map fits bounds to include 911 + dispatched units (after Dispatch). */
+  const [mapFlyToBounds, setMapFlyToBounds] = useState<{
+    ne: { lat: number; lng: number }
+    sw: { lat: number; lng: number }
+  } | null>(null)
   /** Closest vehicle id per type (from assess + poll) for list-click zoom. */
   const [closestVehicleByType, setClosestVehicleByType] = useState<{
     ambulance?: string | null
@@ -550,6 +559,8 @@ export default function LiveSimulationPage({
   crimeResolvedIdsRef.current = crimeResolvedIds
   crimeProximitySecondsRef.current = crimeProximitySeconds
   highlightedVehicleIdsRef.current = highlightedVehicleIds
+  const dispatchedVehicleIdsRef = useRef<string[] | null>(null)
+  dispatchedVehicleIdsRef.current = dispatchedVehicleIds
   const hasDispatchedRef = useRef(hasDispatched)
   hasDispatchedRef.current = hasDispatched
 
@@ -759,11 +770,20 @@ export default function LiveSimulationPage({
   }, [crimesFromApi, crimeSimSeconds, crimeResolvedIds, crimePopScales])
   crimePointsRef.current = crimeMapPoints
 
-  // Mark closest-available (recommended) vehicles for map highlight; source: assess response + polling
+  // Mark closest-available (recommended) and dispatched (en route) for map highlight.
   const mapPointsWithRecommended = useMemo(() => {
-    const ids = new Set(highlightedVehicleIds)
-    return mapPoints.map((p) => ({ ...p, recommended: ids.has(p.id) }))
-  }, [mapPoints, highlightedVehicleIds])
+    const recommendedIds = new Set(
+      hasDispatched && dispatchedVehicleIds && dispatchedVehicleIds.length > 0
+        ? dispatchedVehicleIds
+        : highlightedVehicleIds
+    )
+    const dispatchedSet = new Set(hasDispatched && dispatchedVehicleIds ? dispatchedVehicleIds : [])
+    return mapPoints.map((p) => ({
+      ...p,
+      recommended: recommendedIds.has(p.id),
+      enRoute: dispatchedSet.has(p.id),
+    }))
+  }, [mapPoints, highlightedVehicleIds, hasDispatched, dispatchedVehicleIds])
 
   // Only show 911 call point on map after "Start call" is pressed
   const mapPointsForDisplay = useMemo(
@@ -869,8 +889,10 @@ export default function LiveSimulationPage({
       try {
         const crimesForBackend = crimePointsRef.current.map((p) => ({ lat: p.lat, lng: p.lng }))
         const callPoint = current911PointRef.current
-        const dispatchVehicleIds = highlightedVehicleIdsRef.current
         const shouldSteerTo911 = hasDispatchedRef.current
+        const dispatchVehicleIds = shouldSteerTo911
+          ? (dispatchedVehicleIdsRef.current ?? [])
+          : highlightedVehicleIdsRef.current
         const dispatchTarget =
           shouldSteerTo911 && callPoint?.type === "911"
             ? { lat: callPoint.lat, lng: callPoint.lng }
@@ -1081,6 +1103,7 @@ export default function LiveSimulationPage({
       setClosestVehicleByType(null)
       setDispatchUnitCounts({ police: 0, fire: 0, medical: 0 })
       setHasDispatched(false)
+      setDispatchedVehicleIds(null)
       return
     }
     const incidentLocation =
@@ -1140,6 +1163,7 @@ export default function LiveSimulationPage({
     setCallerAudioUrl(null)
     setConversationHistory([])
     setNotes([])
+    setNoteSuggestion(null)
     setLastCallerResponseSeconds(0)
     try {
       const data = await generateCallAudio(scenarioForApi, {
@@ -1186,6 +1210,9 @@ export default function LiveSimulationPage({
         lat: loc?.lat ?? DEFAULT_911_POINT.lat,
         lng: loc?.lng ?? DEFAULT_911_POINT.lng,
       })
+      getNoteSuggestion(data.transcript).then(({ suggestion }) => {
+        if (suggestion) setNoteSuggestion(suggestion)
+      }).catch(() => {})
     } catch (e) {
       setApiError(e instanceof Error ? e.message : "Failed to start call")
       setConnectionStatus("disconnected")
@@ -1228,6 +1255,7 @@ export default function LiveSimulationPage({
     setPartialText("")
     setCallerAudioUrl(null)
     setConversationHistory([])
+    setNoteSuggestion(null)
     setDispatchRecommendation(null)
     setHighlightedVehicleIds([])
     setClosestVehicleByType(null)
@@ -1318,6 +1346,9 @@ export default function LiveSimulationPage({
           text: data.transcript,
         },
       ])
+      getNoteSuggestion(data.transcript).then(({ suggestion }) => {
+        if (suggestion) setNoteSuggestion(suggestion)
+      }).catch(() => {})
     } catch (e) {
       setApiError(e instanceof Error ? e.message : "Failed to get caller response")
     } finally {
@@ -1369,6 +1400,9 @@ export default function LiveSimulationPage({
           text: data.transcript,
         },
       ])
+      getNoteSuggestion(data.transcript).then(({ suggestion }) => {
+        if (suggestion) setNoteSuggestion(suggestion)
+      }).catch(() => {})
     } catch (e) {
       setApiError(e instanceof Error ? e.message : "Failed to get caller response")
     } finally {
@@ -1428,6 +1462,9 @@ export default function LiveSimulationPage({
           text: data.transcript,
         },
       ])
+      getNoteSuggestion(data.transcript).then(({ suggestion }) => {
+        if (suggestion) setNoteSuggestion(suggestion)
+      }).catch(() => {})
     } catch (e) {
       setApiError(
         e instanceof Error ? e.message : "Failed to send voice message"
@@ -1463,11 +1500,6 @@ export default function LiveSimulationPage({
           <div className="flex min-w-0 items-center gap-3">
             <h1 className="text-lg font-semibold text-foreground">Live Call</h1>
             <span className="text-xs text-muted-foreground">Session {sessionId}</span>
-            {scenarioPayload?.scenario?.title ?? scenario.title ? (
-              <span className="truncate text-sm text-muted-foreground">
-                — {scenarioPayload?.scenario?.title ?? scenario.title}
-              </span>
-            ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-3">
             {callActive && (
@@ -1543,6 +1575,9 @@ export default function LiveSimulationPage({
                   onSelectPoint={setSelectedPointId}
                   flyToTarget={mapFlyToTarget}
                   onFlyToComplete={() => setMapFlyToTarget(null)}
+                  flyToBounds={mapFlyToBounds}
+                  onFlyToBoundsComplete={() => setMapFlyToBounds(null)}
+                  dispatchedVehicleIds={dispatchedVehicleIds}
                   className="absolute inset-0 h-full w-full"
                 />
                 <div className="absolute bottom-3 left-3 z-10 flex flex-wrap gap-4 rounded-md border border-border/80 bg-card/95 px-3 py-2 text-xs shadow-sm backdrop-blur">
@@ -1580,8 +1615,8 @@ export default function LiveSimulationPage({
 
           {/* Right half — 4 components: transcript (top), then bottom split = controls + dispatch | notes */}
           <div className="flex min-h-[320px] min-w-0 flex-1 flex-col gap-3 lg:min-h-0">
-            {/* Live transcription: caller audio top-right, transcript middle, mic bottom */}
-            <Card className="flex min-h-0 flex-1 flex-col overflow-hidden border bg-card min-w-0">
+            {/* Live transcription: half of right column; dispatch/notes get the other half */}
+            <Card className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border bg-card">
               <CardHeader className="shrink-0 border-b py-2.5 flex flex-row items-center justify-between gap-3">
                 <CardTitle className="text-sm font-medium">Live transcription</CardTitle>
                 <div className="flex items-center gap-2 min-w-0 shrink-0">
@@ -1613,13 +1648,13 @@ export default function LiveSimulationPage({
               </div>
             </Card>
 
-            {/* Bottom half: split — Dispatch | Notes */}
-            <div className="flex shrink-0 flex-col gap-2 lg:flex-row lg:min-h-0">
-              <div className="flex min-w-0 flex-1 flex-col gap-2 overflow-y-auto lg:min-h-0 lg:max-w-[55%]">
+            {/* Bottom half: split — Dispatch | Notes; same height as transcript (half and half); panels scroll */}
+            <div className="flex min-h-0 flex-1 flex-col gap-2 lg:flex-row">
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto lg:max-w-[55%]">
                 {/* Dispatch recommendations */}
             <Card
               className={cn(
-                "shrink-0 border bg-card transition-all relative overflow-hidden",
+                "shrink-0 border bg-card transition-all relative overflow-hidden min-w-0",
                 callActive && "ring-1 ring-primary/30",
                 isAssessingDispatch && "ring-primary/50 shadow-md"
               )}
@@ -1785,7 +1820,56 @@ export default function LiveSimulationPage({
                           type="button"
                           variant={dispatchMatchesRecommendation ? "default" : "outline"}
                           className="h-7 min-h-7 w-full gap-1 px-2 text-xs"
-                          onClick={() => setHasDispatched(true)}
+                          onClick={() => {
+                            setHasDispatched(true)
+                            const incidentLocation =
+                              scenarioCallLocation ?? {
+                                lat: current911PointRef.current?.lat ?? 37.7749,
+                                lng: current911PointRef.current?.lng ?? -122.4194,
+                              }
+                            const { police, fire, medical } = dispatchUnitCounts
+                            const neededTypes: ("police" | "fire" | "ambulance")[] = []
+                            for (let i = 0; i < police; i++) neededTypes.push("police")
+                            for (let i = 0; i < fire; i++) neededTypes.push("fire")
+                            for (let i = 0; i < medical; i++) neededTypes.push("ambulance")
+                            if (neededTypes.length === 0) {
+                              setDispatchedVehicleIds([])
+                              return
+                            }
+                            fetchClosestVehicles(incidentLocation, { neededTypes })
+                              .then((res) => {
+                                const ids = res.closestVehicleIds ?? []
+                                setDispatchedVehicleIds(ids)
+                                const callPoint = current911PointRef.current
+                                const pts = mapPointsRef.current ?? []
+                                const idSet = new Set(ids)
+                                const vehicles = pts.filter(
+                                  (p) =>
+                                    (p.type === "police" || p.type === "fire" || p.type === "ambulance") &&
+                                    idSet.has(p.id)
+                                )
+                                const all: { lat: number; lng: number }[] = []
+                                if (callPoint?.type === "911")
+                                  all.push({ lat: callPoint.lat, lng: callPoint.lng })
+                                vehicles.forEach((v) => all.push({ lat: v.lat, lng: v.lng }))
+                                if (all.length > 0) {
+                                  const lats = all.map((a) => a.lat)
+                                  const lngs = all.map((a) => a.lng)
+                                  const padding = 0.008
+                                  setMapFlyToBounds({
+                                    sw: {
+                                      lat: Math.min(...lats) - padding,
+                                      lng: Math.min(...lngs) - padding,
+                                    },
+                                    ne: {
+                                      lat: Math.max(...lats) + padding,
+                                      lng: Math.max(...lngs) + padding,
+                                    },
+                                  })
+                                }
+                              })
+                              .catch(() => setDispatchedVehicleIds([]))
+                          }}
                         >
                           <SendHorizontal className="h-3 w-3" />
                           Dispatch
@@ -1832,11 +1916,13 @@ export default function LiveSimulationPage({
               </div>
 
               {/* Right: Operator notes */}
-              <Card className="flex min-h-[200px] min-w-0 flex-1 flex-col border bg-card overflow-hidden lg:min-h-0">
+              <Card className="flex min-h-0 min-w-0 flex-1 flex-col border bg-card overflow-hidden">
                 <NotesPanel
                   callSeconds={callSeconds}
                   notes={notes}
                   onAddNote={(entry) => setNotes((prev) => [...prev, entry])}
+                  suggestedNote={noteSuggestion}
+                  onAddSuggestedNote={() => setNoteSuggestion(null)}
                 />
               </Card>
             </div>

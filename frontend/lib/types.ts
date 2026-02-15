@@ -85,4 +85,6 @@ export interface NoteEntry {
   timestamp: number
   text: string
   tag?: string
+  /** True when the note was added from the AI suggestion chip. */
+  fromSuggestion?: boolean
 }

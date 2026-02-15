@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { assessTranscriptWithLLM } from '../services/liveEvalService.js';
-import { classifyTranscript } from '../services/openaiService.js';
+import { classifyTranscript, getNoteSuggestion } from '../services/openaiService.js';
 import { getPositions } from '../services/vehicleSimulation.js';
 import { rankByProximityAndETA, getClosestVehiclesForNeededTypes, unitTypeToSimType } from '../services/proximityRanking.js';
 
@@ -123,6 +123,26 @@ router.post('/classify-transcript', async (req, res) => {
     const message = e.message || 'Classification failed';
     if (message.includes('OPENAI_API_KEY')) {
       res.status(503).json({ error: 'Classification unavailable: OPENAI_API_KEY not set.' });
+      return;
+    }
+    res.status(500).json({ error: message });
+  }
+});
+
+/**
+ * POST /api/call-evaluation/note-suggestion
+ * Body: { callerText: string } — latest caller statement.
+ * Returns: { suggestion: string } — short note if relevant, else "".
+ */
+router.post('/note-suggestion', async (req, res) => {
+  try {
+    const callerText = typeof req.body?.callerText === 'string' ? req.body.callerText : '';
+    const suggestion = await getNoteSuggestion(callerText);
+    res.json({ suggestion });
+  } catch (e) {
+    const message = e.message || 'Note suggestion failed';
+    if (message.includes('OPENAI_API_KEY')) {
+      res.status(503).json({ error: 'Note suggestion unavailable: OPENAI_API_KEY not set.' });
       return;
     }
     res.status(500).json({ error: message });

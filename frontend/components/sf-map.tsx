@@ -28,6 +28,7 @@ import {
   CRIME_POINT_STROKE_COLOR,
   MAP_POINT_RECOMMENDED_STROKE_COLOR,
   MAP_POINT_RECOMMENDED_RING_RADIUS_BY_ZOOM,
+  MAP_POINT_ENROUTE_STROKE_COLOR,
   MAP_POINT_UNIT_IDLE_RADIUS_SCALE,
   MAP_LABEL_ZOOM_911,
   MAP_LABEL_ZOOM_UNITS,
@@ -59,6 +60,7 @@ function pointsToGeoJSON(points: MapPoint[]): GeoJSON.FeatureCollection {
         disabled: p.disabled ?? false,
         radiusScale: p.radiusScale ?? 1,
         recommended: p.recommended ?? false,
+        enRoute: p.enRoute ?? false,
         status: p.status === 1 || p.status === true,
         ...(p.type === "crime" && p.priority != null && { priority: p.priority }),
       },
@@ -308,6 +310,7 @@ const POINTS_LAYER_SELECTED_UNIT_IDLE_ID = "map-points-circles-selected-unit-idl
 const POINTS_LAYER_911_ID = "map-points-circles-911"
 const POINTS_LAYER_SELECTED_911_ID = "map-points-circles-selected-911"
 const POINTS_LAYER_RECOMMENDED_ID = "map-points-circles-recommended"
+const POINTS_LAYER_ENROUTE_ID = "map-points-circles-enroute"
 const POINTS_911_BEACONS_SOURCE_ID = "map-points-911-beacons"
 const POINTS_911_BEACON_LAYER_ID = "map-points-911-beacon-extrusion"
 const POINTS_CRIME_BEACONS_SOURCE_ID = "map-points-crime-beacons"
@@ -391,6 +394,11 @@ export interface SFMapProps {
   /** When set, map flies to this point then onFlyToComplete is called. */
   flyToTarget?: { lat: number; lng: number } | null
   onFlyToComplete?: () => void
+  /** When set, map fits bounds (e.g. 911 + dispatched units) then onFlyToBoundsComplete is called. */
+  flyToBounds?: { ne: { lat: number; lng: number }; sw: { lat: number; lng: number } } | null
+  onFlyToBoundsComplete?: () => void
+  /** Dispatched vehicle ids (for en-route ring display). */
+  dispatchedVehicleIds?: string[] | null
 }
 
 export function SFMap({
@@ -402,6 +410,9 @@ export function SFMap({
   className,
   flyToTarget = null,
   onFlyToComplete,
+  flyToBounds = null,
+  onFlyToBoundsComplete,
+  dispatchedVehicleIds = null,
 }: SFMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
@@ -412,6 +423,9 @@ export function SFMap({
   const lastFlyToRef = useRef<{ lat: number; lng: number } | null>(null)
   const onFlyToCompleteRef = useRef(onFlyToComplete)
   onFlyToCompleteRef.current = onFlyToComplete
+  const lastFlyToBoundsRef = useRef<typeof flyToBounds>(null)
+  const onFlyToBoundsCompleteRef = useRef(onFlyToBoundsComplete)
+  onFlyToBoundsCompleteRef.current = onFlyToBoundsComplete
   const routeCoordsRef = useRef<[number, number][] | null>(null)
   const routeCacheKeyRef = useRef<string | null>(null)
   const [pointsLayerReady, setPointsLayerReady] = useState(false)
@@ -502,6 +516,33 @@ export function SFMap({
       cancelAnimationFrame(rafId)
     }
   }, [flyToTarget, pointsLayerReady])
+
+  // Fly to bounds when flyToBounds is set (e.g. after Dispatch: fit 911 + dispatched units).
+  useEffect(() => {
+    if (!flyToBounds || !pointsLayerReady) return
+    const map = mapRef.current
+    if (!map) return
+    if (
+      lastFlyToBoundsRef.current &&
+      lastFlyToBoundsRef.current.sw.lat === flyToBounds.sw.lat &&
+      lastFlyToBoundsRef.current.sw.lng === flyToBounds.sw.lng &&
+      lastFlyToBoundsRef.current.ne.lat === flyToBounds.ne.lat &&
+      lastFlyToBoundsRef.current.ne.lng === flyToBounds.ne.lng
+    )
+      return
+    lastFlyToBoundsRef.current = flyToBounds
+    const bounds: [[number, number], [number, number]] = [
+      [flyToBounds.sw.lng, flyToBounds.sw.lat],
+      [flyToBounds.ne.lng, flyToBounds.ne.lat],
+    ]
+    const onComplete = () => {
+      lastFlyToBoundsRef.current = null
+      onFlyToBoundsCompleteRef.current?.()
+    }
+    map.fitBounds(bounds, { padding: 48, duration: 2000 })
+    const t = window.setTimeout(onComplete, 2100)
+    return () => window.clearTimeout(t)
+  }, [flyToBounds, pointsLayerReady])
 
   // Add points source + layer after style loads (style.load or load so we catch when map is ready)
   useEffect(() => {
@@ -701,12 +742,13 @@ export function SFMap({
         } as CirclePaint,
       })
 
-      // Recommended (closest available) units: highlight ring on top of units
+      // Recommended (closest available, not yet dispatched): pink ring
       const flatRecommendedRadius = MAP_POINT_RECOMMENDED_RING_RADIUS_BY_ZOOM.flat()
       const filterRecommendedUnit = [
         "all",
         FILTER_UNIT,
         ["get", "recommended"],
+        ["!", ["get", "enRoute"]],
       ] as maplibregl.FilterSpecification
       map.addLayer({
         id: POINTS_LAYER_RECOMMENDED_ID,
@@ -718,6 +760,26 @@ export function SFMap({
           "circle-color": "rgba(0,0,0,0)",
           "circle-stroke-width": 3,
           "circle-stroke-color": MAP_POINT_RECOMMENDED_STROKE_COLOR,
+          "circle-opacity": 1,
+        } as CirclePaint,
+      })
+
+      // En route (dispatched to 911): cyan ring so it's distinct from recommended
+      const filterEnRouteUnit = [
+        "all",
+        FILTER_UNIT,
+        ["get", "enRoute"],
+      ] as maplibregl.FilterSpecification
+      map.addLayer({
+        id: POINTS_LAYER_ENROUTE_ID,
+        type: "circle",
+        source: POINTS_SOURCE_ID,
+        filter: filterEnRouteUnit,
+        paint: {
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatRecommendedRadius],
+          "circle-color": "rgba(0,0,0,0)",
+          "circle-stroke-width": 3,
+          "circle-stroke-color": MAP_POINT_ENROUTE_STROKE_COLOR,
           "circle-opacity": 1,
         } as CirclePaint,
       })
@@ -796,6 +858,9 @@ export function SFMap({
       map.setLayoutProperty(POINTS_LAYER_SELECTED_911_ID, "visibility", circleVisibility)
       if (map.getLayer(POINTS_LAYER_RECOMMENDED_ID)) {
         map.setLayoutProperty(POINTS_LAYER_RECOMMENDED_ID, "visibility", pitch > PITCH_ELLIPSE_THRESHOLD_DEG ? "visible" : circleVisibility)
+      }
+      if (map.getLayer(POINTS_LAYER_ENROUTE_ID)) {
+        map.setLayoutProperty(POINTS_LAYER_ENROUTE_ID, "visibility", pitch > PITCH_ELLIPSE_THRESHOLD_DEG ? "visible" : circleVisibility)
       }
 
       setPointsLayerReady(true)
@@ -1076,6 +1141,9 @@ export function SFMap({
       }
       if (map.getLayer(POINTS_LAYER_RECOMMENDED_ID)) {
         map.setLayoutProperty(POINTS_LAYER_RECOMMENDED_ID, "visibility", useEllipses ? "visible" : circleVis)
+      }
+      if (map.getLayer(POINTS_LAYER_ENROUTE_ID)) {
+        map.setLayoutProperty(POINTS_LAYER_ENROUTE_ID, "visibility", useEllipses ? "visible" : circleVis)
       }
       for (const id of [
         POINTS_ELLIPSE_LAYER_ID,

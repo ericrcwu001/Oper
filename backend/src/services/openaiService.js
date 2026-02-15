@@ -257,3 +257,33 @@ export async function classifyTranscript(transcript) {
   const label = completion.choices[0]?.message?.content?.trim();
   return label ? label.toUpperCase().replace(/\n/g, ' ') : '';
 }
+
+/**
+ * Suggest a very short note (a few words) from the caller's latest statement if medically/situationally relevant.
+ * Uses a small, fast model. Returns empty string if nothing relevant to log.
+ *
+ * @param {string} callerText - Single statement from the caller (e.g. one transcript turn).
+ * @returns {Promise<string>} - Concise note like "could be stroke" or "".
+ */
+export async function getNoteSuggestion(callerText) {
+  if (!config.openai.apiKey) return '';
+  const text = typeof callerText === 'string' ? callerText.trim() : '';
+  if (!text) return '';
+
+  const openai = new OpenAI({ apiKey: config.openai.apiKey });
+  const completion = await openai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    messages: [
+      {
+        role: 'system',
+        content:
+          'You are a 911 operator assistant. Given one statement from a 911 caller, output a very short note (a few words) ONLY if there is medically or situationally relevant information to log. Examples: "could be stroke", "chest pain", "unconscious", "multiple victims". If nothing relevant to log, output nothing. Output only the note or nothing, no explanation.',
+      },
+      { role: 'user', content: `Caller said: ${text.slice(0, 500)}` },
+    ],
+    max_tokens: 20,
+  });
+
+  const raw = completion.choices[0]?.message?.content?.trim();
+  return raw ? raw.replace(/\n/g, ' ').slice(0, 80) : '';
+}

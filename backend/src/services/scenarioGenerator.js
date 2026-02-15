@@ -118,10 +118,9 @@ function userPrompt(difficulty, scenarioType) {
 
 const VALID_DIFFICULTIES = ['easy', 'medium', 'hard'];
 
-/** True when DEMO env is set to "true" or "1" (case-insensitive). */
 function isDemoMode() {
   const v = process.env.DEMO;
-  return v === 'true' || v === '1' || (typeof v === 'string' && v.trim().toLowerCase() === 'true');
+  return v === 'true';
 }
 
 /**
@@ -129,48 +128,7 @@ function isDemoMode() {
  * @param {string} difficulty - "easy" | "medium" | "hard" (used for persona/behavior derivation).
  */
 function getDemoScenarioPayload(difficulty) {
-  return {
-    scenario: {
-      id: 'demo-scenario-911',
-      scenario_type: 'traffic-accident',
-      title: 'Two-car collision with injuries',
-      description: 'A two-vehicle collision at an intersection. One driver is conscious but in pain; the other may have hit their head. Bystanders are present. The caller is a witness who stopped to help.',
-      caller_profile: {
-        name: 'Jordan',
-        age: 34,
-        emotion: 'anxious',
-        gender: 'neutral',
-        race: '',
-        other_relevant_details: 'Witness at scene; not in either vehicle.',
-      },
-      critical_info: [
-        'Location: 2500 Mission St at 21st St, San Francisco',
-        'Two vehicles involved; one driver possibly head injury',
-        'Other driver conscious, complaining of neck pain',
-        'No fire or fuel leak observed',
-        'Bystanders directing traffic',
-      ],
-      expected_actions: [
-        'Get exact address and cross streets',
-        'Confirm number of vehicles and people involved',
-        'Ask about consciousness and obvious injuries',
-        'Advise caller to stay on line and not move injured if unsafe',
-        'Dispatch police and EMS as appropriate',
-      ],
-      optional_complications: ['Caller may get distracted by scene', 'Background noise from traffic'],
-      difficulty,
-      language: 'en',
-      location: {
-        address: '2500 Mission St at 21st St, San Francisco',
-        lat: 37.75492,
-        lng: -122.41891,
-      },
-    },
-    timeline: {
-      '45': 'Bystander reports the conscious driver is trying to get out of the car.',
-      '90': 'Caller says they see flashing lights—another driver may have called 911.',
-    },
-  };
+  return JSON.parse(process.env.DEMO_SCENARIO_PAYLOAD);
 }
 
 /**
@@ -190,57 +148,36 @@ export async function generateScenario(difficulty) {
     throw new Error('difficulty must be one of: easy, medium, hard');
   }
 
-  if (isDemoMode()) {
-    const payload = getDemoScenarioPayload(normalized);
-    const scenario = payload.scenario || {};
-
-    // Reuse same normalization as LLM path (location bounds, timeline, voice fields)
-    if (!scenario.location || typeof scenario.location !== 'object') {
-      scenario.location = { address: 'San Francisco, CA', lat: 37.7749, lng: -122.4194 };
+  let payload = {};
+  if (process.env.DEMO !== 'true') {
+    const apiKey = config.openai?.apiKey || process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new Error('OPENAI_API_KEY environment variable is not set');
     }
-    const SF_LAT_MIN = 37.7;
-    const SF_LAT_MAX = 37.83;
-    const SF_LNG_MIN = -122.52;
-    const SF_LNG_MAX = -122.35;
-    const loc = scenario.location;
-    loc.lat = Math.max(SF_LAT_MIN, Math.min(SF_LAT_MAX, Number(loc.lat) || 37.7749));
-    loc.lng = Math.max(SF_LNG_MIN, Math.min(SF_LNG_MAX, Number(loc.lng) || -122.4194));
-    if (typeof loc.address !== 'string' || !loc.address.trim()) {
-      loc.address = 'San Francisco, CA';
+
+    const client = new OpenAI({ apiKey });
+    const scenarioType = pickRandomScenarioType(normalized);
+
+    const response = await client.chat.completions.create({
+      model: 'gpt-4o-mini',
+      temperature: 0.8,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: userPrompt(normalized, scenarioType) },
+      ],
+    });
+
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
+      throw new Error('OpenAI returned empty response');
     }
-    payload.scenario = scenario;
 
-    if (payload.timeline == null || typeof payload.timeline !== 'object' || Array.isArray(payload.timeline)) {
-      payload.timeline = {};
-    }
-    deriveVoiceFields(payload);
-    return payload;
+    payload = JSON.parse(content);
   }
-
-  const apiKey = config.openai?.apiKey || process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error('OPENAI_API_KEY environment variable is not set');
+  else {
+     payload = JSON.parse(process.env.DEMO_SCENARIO_PAYLOAD);
   }
-
-  const client = new OpenAI({ apiKey });
-  const scenarioType = pickRandomScenarioType(normalized);
-
-  const response = await client.chat.completions.create({
-    model: 'gpt-4o-mini',
-    temperature: 0.8,
-    response_format: { type: 'json_object' },
-    messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: userPrompt(normalized, scenarioType) },
-    ],
-  });
-
-  const content = response.choices[0]?.message?.content;
-  if (!content) {
-    throw new Error('OpenAI returned empty response');
-  }
-
-  const payload = JSON.parse(content);
   const scenario = payload.scenario || {};
 
   if (!scenario.id) {

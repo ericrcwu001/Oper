@@ -2,25 +2,10 @@
 
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
-import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import {
-  MapPin,
-  User,
-  AlertTriangle,
-  Truck,
-  Flame,
-} from "lucide-react"
+import { cn } from "@/lib/utils"
 import type { NoteEntry } from "@/lib/types"
-
-const quickTags = [
-  { tag: "Location", icon: MapPin },
-  { tag: "Caller Name", icon: User },
-  { tag: "Injuries", icon: AlertTriangle },
-  { tag: "Hazards", icon: Flame },
-  { tag: "Units Dispatched", icon: Truck },
-]
 
 function formatTs(sec: number) {
   const m = Math.floor(sec / 60)
@@ -32,37 +17,55 @@ interface NotesPanelProps {
   callSeconds: number
   notes: NoteEntry[]
   onAddNote: (entry: NoteEntry) => void
+  /** Optional AI-suggested note from latest caller statement; user can add with one click. */
+  suggestedNote?: string | null
+  /** Called when user adds the suggested note (clears suggestion in parent). */
+  onAddSuggestedNote?: (text: string) => void
 }
 
-export function NotesPanel({ callSeconds, notes, onAddNote }: NotesPanelProps) {
+export function NotesPanel({
+  callSeconds,
+  notes,
+  onAddNote,
+  suggestedNote,
+  onAddSuggestedNote,
+}: NotesPanelProps) {
   const [input, setInput] = useState("")
-  const [activeTag, setActiveTag] = useState<string | undefined>()
 
-  const addNote = () => {
-    if (!input.trim()) return
-    const entry: NoteEntry = {
+  const addNote = (text: string, fromSuggestion = false) => {
+    const trimmed = text.trim()
+    if (!trimmed) return
+    onAddNote({
       id: `n-${Date.now()}`,
       timestamp: callSeconds,
-      text: input.trim(),
-      tag: activeTag,
-    }
-    onAddNote(entry)
+      text: trimmed,
+      fromSuggestion,
+    })
     setInput("")
-    setActiveTag(undefined)
+    if (fromSuggestion) {
+      onAddSuggestedNote?.(trimmed)
+    }
+  }
+
+  const handleAddFromInput = () => {
+    addNote(input)
+  }
+
+  const handleAddSuggestion = () => {
+    if (suggestedNote?.trim()) {
+      addNote(suggestedNote.trim(), true)
+    }
   }
 
   return (
     <div className="flex h-full flex-col">
       <div className="border-b px-4 py-3">
         <h3 className="text-sm font-semibold text-foreground">Notes</h3>
-        <p className="text-xs text-muted-foreground">
-          Tag and timestamp important info
-        </p>
       </div>
 
       <ScrollArea className="flex-1">
         <div className="flex flex-col gap-2 p-4">
-          {notes.length === 0 && (
+          {notes.length === 0 && !suggestedNote && (
             <p className="py-6 text-center text-xs text-muted-foreground">
               No notes yet. Add notes as you gather information.
             </p>
@@ -70,63 +73,53 @@ export function NotesPanel({ callSeconds, notes, onAddNote }: NotesPanelProps) {
           {notes.map((n) => (
             <div
               key={n.id}
-              className="rounded-md border bg-muted/50 px-3 py-2 text-sm"
+              className={cn(
+                "rounded-md border px-3 py-2 text-sm",
+                n.fromSuggestion ? "border-primary/30 bg-primary/5" : "bg-muted/50"
+              )}
             >
-              <div className="mb-1 flex items-center gap-2">
-                <span className="font-mono text-[10px] text-muted-foreground">
-                  {formatTs(n.timestamp)}
-                </span>
-                {n.tag && (
-                  <Badge variant="outline" className="text-[10px]">
-                    {n.tag}
-                  </Badge>
-                )}
-              </div>
-              <p className="text-foreground">{n.text}</p>
+              <span className="font-mono text-[10px] text-muted-foreground">
+                {formatTs(n.timestamp)}
+              </span>
+              <p className="mt-0.5 text-foreground">{n.text}</p>
             </div>
           ))}
         </div>
       </ScrollArea>
 
-      <div className="border-t p-4">
-        <div className="mb-2 flex flex-wrap gap-1.5">
-          {quickTags.map((qt) => (
-            <Button
-              key={qt.tag}
-              variant={activeTag === qt.tag ? "default" : "outline"}
-              size="sm"
-              className="h-7 gap-1 text-xs"
-              onClick={() =>
-                setActiveTag(activeTag === qt.tag ? undefined : qt.tag)
-              }
-            >
-              <qt.icon className="h-3 w-3" />
-              {qt.tag}
-            </Button>
-          ))}
-        </div>
+      <div className="border-t p-4 space-y-2">
+        {suggestedNote?.trim() && (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="w-full justify-center gap-1.5 text-xs"
+            onClick={handleAddSuggestion}
+          >
+            Add: {suggestedNote.trim()}
+          </Button>
+        )}
         <div className="flex gap-2">
-          <Textarea
+          <Input
             placeholder="Add a note..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
+              if (e.key === "Enter") {
                 e.preventDefault()
-                addNote()
+                handleAddFromInput()
               }
             }}
-            className="min-h-[60px] resize-none text-sm"
+            className="text-sm"
           />
+          <Button
+            size="sm"
+            onClick={handleAddFromInput}
+            disabled={!input.trim()}
+          >
+            Add
+          </Button>
         </div>
-        <Button
-          size="sm"
-          className="mt-2 w-full"
-          onClick={addNote}
-          disabled={!input.trim()}
-        >
-          Add Note
-        </Button>
       </div>
     </div>
   )
