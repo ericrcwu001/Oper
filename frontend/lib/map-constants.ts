@@ -38,8 +38,40 @@ export const MAP_POINT_RADIUS_SELECTED_BY_ZOOM: [number, number][] = [
   [16, 9.5],
 ]
 
+/** Slightly smaller radius for police, fire, ambulance units. */
+export const MAP_POINT_RADIUS_UNIT_BY_ZOOM: [number, number][] = [
+  [11, 2],
+  [14, 3.5],
+  [16, 5],
+]
+
+/** Selected radius for police, fire, ambulance (slightly smaller). */
+export const MAP_POINT_RADIUS_UNIT_SELECTED_BY_ZOOM: [number, number][] = [
+  [11, 4],
+  [14, 5.5],
+  [16, 7],
+]
+
 /** Extra radius when point is selected (px). */
 export const MAP_POINT_SELECTED_RADIUS_OFFSET = 2.5
+
+/** 911 beacon extrusion height in meters (visible when map is tilted in 3D). */
+export const MAP_POINT_911_BEACON_HEIGHT_M = 500
+
+/** 911 beacon color (neon red for visibility in 3D). */
+export const MAP_POINT_911_BEACON_COLOR = "#FF073A"
+
+/** 911 beacon footprint half-side in degrees (~25m at SF latitude). */
+export const MAP_POINT_911_BEACON_FOOTPRINT = 0.00022
+
+/** Crime beacon extrusion height in meters (smaller pillars in 3D). */
+export const MAP_POINT_CRIME_BEACON_HEIGHT_M = 500
+
+/** Crime beacon color (light gray for visibility in 3D). */
+export const MAP_POINT_CRIME_BEACON_COLOR = "#E5E7EB"
+
+/** Crime beacon footprint half-side in degrees (smaller than 911). */
+export const MAP_POINT_CRIME_BEACON_FOOTPRINT = 0.00012
 
 /**
  * PMTiles URL for vector basemap. Prefer local copy at /tiles/sf.pmtiles (see frontend/public/tiles/).

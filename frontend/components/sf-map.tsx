@@ -13,6 +13,14 @@ import {
   MAP_POINT_OUTLINE_COLOR,
   MAP_POINT_RADIUS_BY_ZOOM,
   MAP_POINT_RADIUS_SELECTED_BY_ZOOM,
+  MAP_POINT_RADIUS_UNIT_BY_ZOOM,
+  MAP_POINT_RADIUS_UNIT_SELECTED_BY_ZOOM,
+  MAP_POINT_911_BEACON_HEIGHT_M,
+  MAP_POINT_911_BEACON_COLOR,
+  MAP_POINT_911_BEACON_FOOTPRINT,
+  MAP_POINT_CRIME_BEACON_HEIGHT_M,
+  MAP_POINT_CRIME_BEACON_COLOR,
+  MAP_POINT_CRIME_BEACON_FOOTPRINT,
 } from "@/lib/map-constants"
 import { getSFMapStyle } from "@/lib/map-style"
 
@@ -41,9 +49,74 @@ function pointsToGeoJSON(points: MapPoint[]): GeoJSON.FeatureCollection {
   }
 }
 
+/** Small square polygon around a point for fill-extrusion beacon (vertical pillar in 3D). */
+function points911ToBeaconGeoJSON(points: MapPoint[]): GeoJSON.FeatureCollection {
+  const h = MAP_POINT_911_BEACON_FOOTPRINT
+  const features: GeoJSON.Feature<GeoJSON.Polygon>[] = points
+    .filter((p) => p.type === "911")
+    .map((p) => {
+      const [lng, lat] = [p.lng, p.lat]
+      const ring: [number, number][] = [
+        [lng - h, lat - h],
+        [lng + h, lat - h],
+        [lng + h, lat + h],
+        [lng - h, lat + h],
+        [lng - h, lat - h],
+      ]
+      return {
+        type: "Feature",
+        id: p.id,
+        geometry: { type: "Polygon", coordinates: [ring] },
+        properties: { id: p.id },
+      }
+    })
+  return { type: "FeatureCollection", features }
+}
+
+/** Small square polygon for crime fill-extrusion beacon (smaller than 911). */
+function pointsCrimeToBeaconGeoJSON(points: MapPoint[]): GeoJSON.FeatureCollection {
+  const h = MAP_POINT_CRIME_BEACON_FOOTPRINT
+  const features: GeoJSON.Feature<GeoJSON.Polygon>[] = points
+    .filter((p) => p.type === "crime")
+    .map((p) => {
+      const [lng, lat] = [p.lng, p.lat]
+      const ring: [number, number][] = [
+        [lng - h, lat - h],
+        [lng + h, lat - h],
+        [lng + h, lat + h],
+        [lng - h, lat + h],
+        [lng - h, lat - h],
+      ]
+      return {
+        type: "Feature",
+        id: p.id,
+        geometry: { type: "Polygon", coordinates: [ring] },
+        properties: { id: p.id },
+      }
+    })
+  return { type: "FeatureCollection", features }
+}
+
 const POINTS_SOURCE_ID = "map-points"
 const POINTS_LAYER_ID = "map-points-circles"
+const POINTS_LAYER_UNIT_ID = "map-points-circles-unit"
 const POINTS_LAYER_SELECTED_ID = "map-points-circles-selected"
+const POINTS_LAYER_SELECTED_UNIT_ID = "map-points-circles-selected-unit"
+const POINTS_LAYER_911_ID = "map-points-circles-911"
+const POINTS_LAYER_SELECTED_911_ID = "map-points-circles-selected-911"
+const POINTS_911_BEACONS_SOURCE_ID = "map-points-911-beacons"
+const POINTS_911_BEACON_LAYER_ID = "map-points-911-beacon-extrusion"
+const POINTS_CRIME_BEACONS_SOURCE_ID = "map-points-crime-beacons"
+const POINTS_CRIME_BEACON_LAYER_ID = "map-points-crime-beacon-extrusion"
+
+const FILTER_UNIT: maplibregl.FilterSpecification = [
+  "any",
+  ["==", ["get", "type"], "police"],
+  ["==", ["get", "type"], "fire"],
+  ["==", ["get", "type"], "ambulance"],
+]
+const FILTER_CRIME: maplibregl.FilterSpecification = ["==", ["get", "type"], "crime"]
+const FILTER_911: maplibregl.FilterSpecification = ["==", ["get", "type"], "911"]
 
 export interface SFMapProps {
   points: MapPoint[]
@@ -113,7 +186,9 @@ export function SFMap({
       if (map.getSource(POINTS_SOURCE_ID)) return
 
       const flatRadius = MAP_POINT_RADIUS_BY_ZOOM.flat()
+      const flatRadiusUnit = MAP_POINT_RADIUS_UNIT_BY_ZOOM.flat()
       const flatRadiusSelected = MAP_POINT_RADIUS_SELECTED_BY_ZOOM.flat()
+      const flatRadiusUnitSelected = MAP_POINT_RADIUS_UNIT_SELECTED_BY_ZOOM.flat()
       const withSelection = (pointsRef.current ?? []).map((p) => ({
         ...p,
         selected: p.id === (selectedPointIdRef.current ?? null),
@@ -150,31 +225,130 @@ export function SFMap({
       }
 
       type CirclePaint = maplibregl.CircleLayerSpecification["paint"]
+      const unselected: maplibregl.FilterSpecification = ["!", ["get", "selected"]]
+      const selected: maplibregl.FilterSpecification = ["get", "selected"]
+      const filterUnselectedCrime = ["all", unselected, FILTER_CRIME] as maplibregl.FilterSpecification
+      const filterUnselectedUnit = ["all", unselected, FILTER_UNIT] as maplibregl.FilterSpecification
+      const filterSelectedCrime = ["all", selected, FILTER_CRIME] as maplibregl.FilterSpecification
+      const filterSelectedUnit = ["all", selected, FILTER_UNIT] as maplibregl.FilterSpecification
+      const filterUnselected911 = ["all", unselected, FILTER_911] as maplibregl.FilterSpecification
+      const filterSelected911 = ["all", selected, FILTER_911] as maplibregl.FilterSpecification
 
-      // Unselected: zoom must be top-level in interpolate (MapLibre requirement)
+      // Crime (unselected)
       map.addLayer({
         id: POINTS_LAYER_ID,
         type: "circle",
         source: POINTS_SOURCE_ID,
-        filter: ["!", ["get", "selected"]],
+        filter: filterUnselectedCrime,
         paint: {
           ...paintBase,
           "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatRadius],
         } as CirclePaint,
       })
 
-      // Selected: same, separate layer so radius uses only top-level interpolate
+      // Unselected police/fire/ambulance (slightly smaller)
+      map.addLayer({
+        id: POINTS_LAYER_UNIT_ID,
+        type: "circle",
+        source: POINTS_SOURCE_ID,
+        filter: filterUnselectedUnit,
+        paint: {
+          ...paintBase,
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatRadiusUnit],
+        } as CirclePaint,
+      })
+
+      // Selected crime
       map.addLayer({
         id: POINTS_LAYER_SELECTED_ID,
         type: "circle",
         source: POINTS_SOURCE_ID,
-        filter: ["get", "selected"],
+        filter: filterSelectedCrime,
         paint: {
           ...paintBase,
           "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatRadiusSelected],
         } as CirclePaint,
       })
+
+      // Selected police/fire/ambulance (slightly smaller)
+      map.addLayer({
+        id: POINTS_LAYER_SELECTED_UNIT_ID,
+        type: "circle",
+        source: POINTS_SOURCE_ID,
+        filter: filterSelectedUnit,
+        paint: {
+          ...paintBase,
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatRadiusUnitSelected],
+        } as CirclePaint,
+      })
+
+      // 911 unselected (on top)
+      map.addLayer({
+        id: POINTS_LAYER_911_ID,
+        type: "circle",
+        source: POINTS_SOURCE_ID,
+        filter: filterUnselected911,
+        paint: {
+          ...paintBase,
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatRadius],
+        } as CirclePaint,
+      })
+
+      // 911 selected (on top)
+      map.addLayer({
+        id: POINTS_LAYER_SELECTED_911_ID,
+        type: "circle",
+        source: POINTS_SOURCE_ID,
+        filter: filterSelected911,
+        paint: {
+          ...paintBase,
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatRadiusSelected],
+        } as CirclePaint,
+      })
+
       setPointsLayerReady(true)
+
+      // 911 vertical beacon (fill-extrusion, visible in 3D/tilted view); skip if unsupported
+      try {
+        map.addSource(POINTS_911_BEACONS_SOURCE_ID, {
+          type: "geojson",
+          data: points911ToBeaconGeoJSON(pointsRef.current ?? []),
+        })
+        map.addLayer({
+          id: POINTS_911_BEACON_LAYER_ID,
+          type: "fill-extrusion",
+          source: POINTS_911_BEACONS_SOURCE_ID,
+          paint: {
+            "fill-extrusion-base": 0,
+            "fill-extrusion-height": MAP_POINT_911_BEACON_HEIGHT_M,
+            "fill-extrusion-color": MAP_POINT_911_BEACON_COLOR,
+            "fill-extrusion-opacity": 0.85,
+          },
+        })
+      } catch {
+        // fill-extrusion may be unsupported in some environments; circles still work
+      }
+
+      // Crime vertical beacons (smaller, height 500m); skip if unsupported
+      try {
+        map.addSource(POINTS_CRIME_BEACONS_SOURCE_ID, {
+          type: "geojson",
+          data: pointsCrimeToBeaconGeoJSON(pointsRef.current ?? []),
+        })
+        map.addLayer({
+          id: POINTS_CRIME_BEACON_LAYER_ID,
+          type: "fill-extrusion",
+          source: POINTS_CRIME_BEACONS_SOURCE_ID,
+          paint: {
+            "fill-extrusion-base": 0,
+            "fill-extrusion-height": MAP_POINT_CRIME_BEACON_HEIGHT_M,
+            "fill-extrusion-color": MAP_POINT_CRIME_BEACON_COLOR,
+            "fill-extrusion-opacity": 0.85,
+          },
+        })
+      } catch {
+        // fill-extrusion may be unsupported
+      }
     }
 
     if (map.isStyleLoaded()) onStyleLoad()
@@ -185,7 +359,7 @@ export function SFMap({
     }
   }, [])
 
-  // Sync points and selected state to GeoJSON source
+  // Sync points and selected state to GeoJSON source; sync 911 and crime beacon polygons
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
@@ -198,6 +372,11 @@ export function SFMap({
       selected: p.id === selectedPointId,
     }))
     source.setData(pointsToGeoJSON(withSelection))
+
+    const beaconSource = map.getSource(POINTS_911_BEACONS_SOURCE_ID) as maplibregl.GeoJSONSource
+    if (beaconSource) beaconSource.setData(points911ToBeaconGeoJSON(points))
+    const crimeBeaconSource = map.getSource(POINTS_CRIME_BEACONS_SOURCE_ID) as maplibregl.GeoJSONSource
+    if (crimeBeaconSource) crimeBeaconSource.setData(pointsCrimeToBeaconGeoJSON(points))
   }, [points, selectedPointId])
 
   const showPopup = useCallback(
@@ -299,7 +478,7 @@ export function SFMap({
 
     const handleClick = (e: maplibregl.MapMouseEvent) => {
       const features = map.queryRenderedFeatures(e.point, {
-        layers: [POINTS_LAYER_ID, POINTS_LAYER_SELECTED_ID],
+        layers: [POINTS_LAYER_ID, POINTS_LAYER_UNIT_ID, POINTS_LAYER_SELECTED_ID, POINTS_LAYER_SELECTED_UNIT_ID, POINTS_LAYER_911_ID, POINTS_LAYER_SELECTED_911_ID],
       })
       if (features.length === 0) return
       const feature = features[0]
@@ -325,7 +504,7 @@ export function SFMap({
 
     const handleMouseMove = (e: maplibregl.MapMouseEvent) => {
       const features = map.queryRenderedFeatures(e.point, {
-        layers: [POINTS_LAYER_ID, POINTS_LAYER_SELECTED_ID],
+        layers: [POINTS_LAYER_ID, POINTS_LAYER_UNIT_ID, POINTS_LAYER_SELECTED_ID, POINTS_LAYER_SELECTED_UNIT_ID, POINTS_LAYER_911_ID, POINTS_LAYER_SELECTED_911_ID],
       })
       map.getCanvas().style.cursor = features.length > 0 ? "pointer" : ""
     }
