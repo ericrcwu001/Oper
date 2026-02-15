@@ -23,6 +23,7 @@ export async function speechToText(audioBuffer, filename = 'audio.mp3') {
   const transcription = await openai.audio.transcriptions.create({
     file,
     model: 'whisper-1',
+    language: 'en',
   });
 
   const text = transcription?.text?.trim();
