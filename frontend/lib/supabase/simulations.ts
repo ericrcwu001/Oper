@@ -17,6 +17,8 @@ export interface SimulationData {
     description?: string
     difficulty?: Difficulty
     language?: string
+    criticalInfo?: string[]
+    expectedActions?: string[]
   }
   transcript: TranscriptTurn[]
   notes: NoteEntry[]

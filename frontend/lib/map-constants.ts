@@ -91,8 +91,17 @@ export const MAP_POINT_911_BEACON_COLOR = "#FF336680"
 /** 911 beacon footprint half-side in degrees (~25m at SF latitude). */
 export const MAP_POINT_911_BEACON_FOOTPRINT = 0.00022
 
-/** Crime beacon extrusion height in meters (shorter than 911 in 3D). */
+/** Crime beacon extrusion height in meters (shorter than 911 in 3D). Default when priority is missing. */
 export const MAP_POINT_CRIME_BEACON_HEIGHT_M = 400
+
+/** Crime beacon height by priority (1–5). Higher priority = taller beacon. */
+export const MAP_POINT_CRIME_BEACON_HEIGHT_BY_PRIORITY: Record<number, number> = {
+  1: 200,
+  2: 300,
+  3: 400,
+  4: 550,
+  5: 750,
+}
 
 /** Crime beacon color (yellow to match crime points, transparent but bright). */
 export const MAP_POINT_CRIME_BEACON_COLOR = "#FDE04780"
@@ -109,6 +118,20 @@ export const MAP_POINT_RECOMMENDED_RING_RADIUS_BY_ZOOM: [number, number][] = [
   [14, 6],
   [16, 8.5],
 ]
+
+/** Min zoom for inline labels: 911 and crime show earlier (more important). */
+export const MAP_LABEL_ZOOM_911 = 13
+export const MAP_LABEL_ZOOM_CRIME = 13
+/** Min zoom for crime labels by priority (1–5). Higher priority = lower zoom = label visible when more zoomed out. */
+export const MAP_LABEL_ZOOM_CRIME_BY_PRIORITY: Record<number, number> = {
+  1: 14,
+  2: 13,
+  3: 13,
+  4: 12,
+  5: 12,
+}
+/** Units require more zoom to reduce clutter. */
+export const MAP_LABEL_ZOOM_UNITS = 15
 
 /**
  * PMTiles URL for vector basemap. Prefer local copy at /tiles/sf.pmtiles (see frontend/public/tiles/).

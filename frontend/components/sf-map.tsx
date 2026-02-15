@@ -18,12 +18,17 @@ import {
   MAP_POINT_911_BEACON_HEIGHT_M,
   MAP_POINT_911_BEACON_COLOR,
   MAP_POINT_CRIME_BEACON_HEIGHT_M,
+  MAP_POINT_CRIME_BEACON_HEIGHT_BY_PRIORITY,
   MAP_POINT_CRIME_BEACON_COLOR,
   MAP_POINT_CRIME_BEACON_FOOTPRINT,
+  MAP_LABEL_ZOOM_CRIME_BY_PRIORITY,
+  MAP_LABEL_ZOOM_CRIME,
   MAP_POINT_911_STROKE_COLOR,
   CRIME_POINT_STROKE_COLOR,
   MAP_POINT_RECOMMENDED_STROKE_COLOR,
   MAP_POINT_RECOMMENDED_RING_RADIUS_BY_ZOOM,
+  MAP_LABEL_ZOOM_911,
+  MAP_LABEL_ZOOM_UNITS,
 } from "@/lib/map-constants"
 import { getSFMapStyle } from "@/lib/map-style"
 
@@ -50,6 +55,94 @@ function pointsToGeoJSON(points: MapPoint[]): GeoJSON.FeatureCollection {
         radiusScale: p.radiusScale ?? 1,
         recommended: p.recommended ?? false,
         status: p.status === 1 || p.status === true,
+        ...(p.type === "crime" && p.priority != null && { priority: p.priority }),
+      },
+    })),
+  }
+}
+
+/** Skip label values that are empty or UNKNOWN. */
+function isUnknownOrEmpty(val: string | undefined): boolean {
+  if (val == null || val.trim() === "") return true
+  const v = val.trim().toUpperCase()
+  return v === "UNKNOWN"
+}
+
+/** Same fields as popup, formatted as plain multi-line text for inline labels. */
+function getPointLabelText(point: MapPoint): string {
+  const coords = `(${point.lng.toFixed(4)}, ${point.lat.toFixed(4)})`
+  const is911 = point.type === "911"
+  const isCrime = point.type === "crime"
+  const fields: { label: string; value?: string }[] = is911
+    ? [
+        { label: "Location", value: point.location },
+        { label: "Description", value: point.description },
+        { label: "Caller ID", value: point.callerId },
+        { label: "Caller name", value: point.callerName },
+        { label: "Time received", value: point.timestamp },
+      ]
+    : isCrime
+      ? [
+          { label: "Category", value: point.location },
+          { label: "Address", value: point.description },
+          { label: "Details", value: point.callerId },
+          { label: "Priority", value: point.priority != null ? String(point.priority) : undefined },
+        ]
+      : [
+          { label: "Location", value: point.location },
+          { label: "Officer in charge", value: point.officerInCharge },
+          { label: "Unit ID", value: point.unitId },
+          {
+            label: "Status",
+            value:
+              typeof point.status === "string"
+                ? point.status
+                : point.status === true
+                  ? "En route"
+                  : point.status === false
+                    ? "Idle"
+                    : "Unknown",
+          },
+        ]
+  // Crime: prefer displayLabel (point.label) when present; add Address and priority
+  if (isCrime && point.label && !isUnknownOrEmpty(point.label)) {
+    const parts = [point.label]
+    if (point.description && !isUnknownOrEmpty(point.description)) {
+      parts.push(point.description)
+    }
+    if (point.priority != null) {
+      parts.push(`Priority ${point.priority}`)
+    }
+    const lines = parts.map((v) => `[${v}]`).join("\n")
+    return `${coords}\n${lines}`
+  }
+  // 911: prefer short incident label from transcript classifier when present
+  if (is911 && point.label && !isUnknownOrEmpty(point.label)) {
+    return `${coords}\n[${point.label}]`
+  }
+  const fieldLines = fields
+    .filter((f) => f.value != null && f.value !== "" && !isUnknownOrEmpty(f.value))
+    .map((f) => `[${f.value}]`)
+    .join("\n")
+  return fieldLines ? `[${coords}]\n${fieldLines}` : `[${coords}]`
+}
+
+/** GeoJSON for label symbol layers: Point features with id, type, text, and labelMinZoom for crime (by priority). */
+function pointsToLabelsGeoJSON(points: MapPoint[]): GeoJSON.FeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: points.map((p) => ({
+      type: "Feature" as const,
+      id: p.id,
+      geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] },
+      properties: {
+        id: p.id,
+        type: p.type,
+        text: getPointLabelText(p),
+        ...(p.type === "crime" && {
+          labelMinZoom:
+            MAP_LABEL_ZOOM_CRIME_BY_PRIORITY[p.priority ?? 2] ?? MAP_LABEL_ZOOM_CRIME,
+        }),
       },
     })),
   }
@@ -173,17 +266,20 @@ function points911ToBeaconGeoJSON(points: MapPoint[], zoom: number, radiusPx: nu
   return { type: "FeatureCollection", features }
 }
 
-/** Cylindrical beacon polygon around crime points. Radius in degrees computed per-point so circumference matches circle. */
+/** Cylindrical beacon polygon around crime points. Height per-point from priority (1–5). */
 function pointsCrimeToBeaconGeoJSON(points: MapPoint[], zoom: number, radiusPx: number): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature<GeoJSON.Polygon>[] = points
     .filter((p) => p.type === "crime")
     .map((p) => {
       const radiusDeg = beaconRadiusDegrees(zoom, p.lat, radiusPx)
+      const priority = p.priority ?? 2
+      const height =
+        MAP_POINT_CRIME_BEACON_HEIGHT_BY_PRIORITY[priority] ?? MAP_POINT_CRIME_BEACON_HEIGHT_M
       return {
         type: "Feature",
         id: p.id,
         geometry: { type: "Polygon", coordinates: [circleToRing(p.lng, p.lat, radiusDeg)] },
-        properties: { id: p.id },
+        properties: { id: p.id, height },
       }
     })
   return { type: "FeatureCollection", features }
@@ -201,6 +297,11 @@ const POINTS_911_BEACONS_SOURCE_ID = "map-points-911-beacons"
 const POINTS_911_BEACON_LAYER_ID = "map-points-911-beacon-extrusion"
 const POINTS_CRIME_BEACONS_SOURCE_ID = "map-points-crime-beacons"
 const POINTS_CRIME_BEACON_LAYER_ID = "map-points-crime-beacon-extrusion"
+
+const POINTS_LABELS_SOURCE_ID = "map-points-labels"
+const POINTS_LABELS_LAYER_911_ID = "map-points-labels-911"
+const POINTS_LABELS_LAYER_CRIME_ID = "map-points-labels-crime"
+const POINTS_LABELS_LAYER_UNITS_ID = "map-points-labels-units"
 
 const POINTS_ELLIPSE_SOURCE_ID = "map-points-ellipses"
 const POINTS_ELLIPSE_LAYER_ID = "map-points-ellipses-fill"
@@ -253,6 +354,8 @@ export function SFMap({
   const pitchRef = useRef<number>(0)
   const useEllipseModeRef = useRef<boolean>(false)
   const lastFlyToRef = useRef<{ lat: number; lng: number } | null>(null)
+  const onFlyToCompleteRef = useRef(onFlyToComplete)
+  onFlyToCompleteRef.current = onFlyToComplete
   const [pointsLayerReady, setPointsLayerReady] = useState(false)
   const [pointsVersion, setPointsVersion] = useState(0)
   if (pointsRef.current !== points) {
@@ -294,7 +397,7 @@ export function SFMap({
     }
   }, [defaultCenter, defaultZoom])
 
-  // Fly to target when flyToTarget is set (e.g. from dispatch list click). Re-run when map becomes ready so early clicks still fly.
+  // Fly to target when flyToTarget is set. Use manual RAF animation so pan/zoom is always smooth (MapLibre easeTo can snap in some envs).
   useEffect(() => {
     if (!flyToTarget) return
     const map = mapRef.current
@@ -302,19 +405,49 @@ export function SFMap({
     const prev = lastFlyToRef.current
     if (prev && prev.lat === flyToTarget.lat && prev.lng === flyToTarget.lng) return
     lastFlyToRef.current = flyToTarget
-    map.flyTo(
-      { center: [flyToTarget.lng, flyToTarget.lat], zoom: 14 },
-      { duration: 800 }
-    )
+    const targetLat = flyToTarget.lat
+    const targetLng = flyToTarget.lng
+    const targetZoom = 14
     const onComplete = () => {
       lastFlyToRef.current = null
-      onFlyToComplete?.()
+      onFlyToCompleteRef.current?.()
     }
-    map.once("moveend", onComplete)
+    const durationMs = 2000
+    let startTime: number | null = null
+    let startLng: number | null = null
+    let startLat: number | null = null
+    let startZoom: number | null = null
+    let rafId = 0
+    const animate = (timestamp: number) => {
+      const m = mapRef.current
+      if (!m) return
+      if (startTime === null) {
+        startTime = timestamp
+        const c = m.getCenter()
+        startLng = c.lng
+        startLat = c.lat
+        startZoom = m.getZoom()
+      }
+      const elapsed = timestamp - startTime
+      const t = Math.min(elapsed / durationMs, 1)
+      const newLng = (startLng as number) + (targetLng - (startLng as number)) * t
+      const newLat = (startLat as number) + (targetLat - (startLat as number)) * t
+      const newZoom = (startZoom as number) + (targetZoom - (startZoom as number)) * t
+      m.jumpTo({ center: [newLng, newLat], zoom: newZoom })
+      if (t < 1) {
+        rafId = requestAnimationFrame(animate)
+      } else {
+        onComplete()
+      }
+    }
+    const timeoutId = window.setTimeout(() => {
+      rafId = requestAnimationFrame(animate)
+    }, 50)
     return () => {
-      map.off("moveend", onComplete)
+      window.clearTimeout(timeoutId)
+      cancelAnimationFrame(rafId)
     }
-  }, [flyToTarget, onFlyToComplete, pointsLayerReady])
+  }, [flyToTarget, pointsLayerReady])
 
   // Add points source + layer after style loads (style.load or load so we catch when map is ready)
   useEffect(() => {
@@ -587,7 +720,7 @@ export function SFMap({
         // fill-extrusion may be unsupported in some environments; circles still work
       }
 
-      // Crime vertical beacons (cylindrical pillars, height 500m); skip if unsupported
+      // Crime vertical beacons (height per-point by priority); skip if unsupported
       try {
         map.addSource(POINTS_CRIME_BEACONS_SOURCE_ID, {
           type: "geojson",
@@ -599,7 +732,11 @@ export function SFMap({
           source: POINTS_CRIME_BEACONS_SOURCE_ID,
           paint: {
             "fill-extrusion-base": 0,
-            "fill-extrusion-height": MAP_POINT_CRIME_BEACON_HEIGHT_M,
+            "fill-extrusion-height": [
+              "coalesce",
+              ["get", "height"],
+              MAP_POINT_CRIME_BEACON_HEIGHT_M,
+            ],
             "fill-extrusion-color": MAP_POINT_CRIME_BEACON_COLOR,
             "fill-extrusion-opacity": 0.85,
           },
@@ -607,6 +744,54 @@ export function SFMap({
       } catch {
         // fill-extrusion may be unsupported
       }
+
+      // Inline labels: appear when zoomed in; 911/crime at lower zoom than units
+      map.addSource(POINTS_LABELS_SOURCE_ID, {
+        type: "geojson",
+        data: pointsToLabelsGeoJSON(pointsRef.current ?? []),
+        promoteId: "id",
+      })
+      const labelLayerBase = {
+        type: "symbol" as const,
+        source: POINTS_LABELS_SOURCE_ID,
+        layout: {
+          "text-field": ["get", "text"],
+          "text-anchor": "left",
+          "text-offset": [0.8, 0],
+          "text-size": 10,
+          "text-font": ["Roboto Regular"],
+          "text-allow-overlap": true,
+          "text-ignore-placement": true,
+        },
+        paint: {
+          "text-color": "#E5E7EB",
+          "text-halo-color": "#0B0C0E",
+          "text-halo-width": 2,
+        },
+      }
+      map.addLayer({
+        ...labelLayerBase,
+        id: POINTS_LABELS_LAYER_911_ID,
+        filter: FILTER_911,
+        minzoom: MAP_LABEL_ZOOM_911,
+      } as maplibregl.SymbolLayerSpecification)
+      // Crime labels: visible when zoom >= labelMinZoom (higher priority = visible when more zoomed out)
+      map.addLayer({
+        ...labelLayerBase,
+        id: POINTS_LABELS_LAYER_CRIME_ID,
+        filter: [
+          "all",
+          FILTER_CRIME,
+          [">=", ["zoom"], ["coalesce", ["get", "labelMinZoom"], 15]],
+        ] as maplibregl.FilterSpecification,
+        minzoom: 10,
+      } as maplibregl.SymbolLayerSpecification)
+      map.addLayer({
+        ...labelLayerBase,
+        id: POINTS_LABELS_LAYER_UNITS_ID,
+        filter: FILTER_UNIT,
+        minzoom: MAP_LABEL_ZOOM_UNITS,
+      } as maplibregl.SymbolLayerSpecification)
     }
 
     if (map.isStyleLoaded()) addPointsLayer()
@@ -648,6 +833,8 @@ export function SFMap({
       const ellipseSource = map.getSource(POINTS_ELLIPSE_SOURCE_ID) as maplibregl.GeoJSONSource
       if (ellipseSource) ellipseSource.setData(pointsToEllipseGeoJSON(pts, zoom, pitchRef.current, selId))
     }
+    const labelsSource = map.getSource(POINTS_LABELS_SOURCE_ID) as maplibregl.GeoJSONSource
+    if (labelsSource) labelsSource.setData(pointsToLabelsGeoJSON(points))
   }, [pointsVersion, selectedPointId])
 
   // Refresh beacon footprint when zoom or center changes so it matches circle radius
@@ -768,18 +955,18 @@ export function SFMap({
 
       const fields: { label: string; value?: string }[] = is911
         ? [
-            { label: "Location", value: point.location ?? "Unknown" },
-            { label: "Description", value: point.description ?? "Unknown" },
-            { label: "Caller ID", value: point.callerId ?? "—" },
-            { label: "Caller name", value: point.callerName ?? "Unknown" },
-            { label: "Time received", value: point.timestamp ?? "—" },
+            { label: "Location", value: point.location },
+            { label: "Description", value: point.description },
+            { label: "Caller ID", value: point.callerId },
+            { label: "Caller name", value: point.callerName },
+            { label: "Time received", value: point.timestamp },
           ]
         : isCrime
           ? [
               { label: "Category", value: point.location },
               { label: "Address", value: point.description },
               { label: "Details", value: point.callerId },
-            ]
+            ].filter((f) => f.value && !isUnknownOrEmpty(f.value))
           : [
               { label: "Location", value: point.location },
               { label: "Officer in charge", value: point.officerInCharge },

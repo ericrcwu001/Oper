@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, useMemo, use } from "react"
+import { useState, useEffect, useRef, useMemo, useCallback, use } from "react"
 import { useRouter, useSearchParams, usePathname } from "next/navigation"
 import { useDispatch, useSelector } from "react-redux"
 import { useSidebarTabs } from "@/context/sidebar-tabs-context"
@@ -47,6 +47,7 @@ import {
   fetchCrimesDay,
   fetchVehicles,
   postCrimesForSteering,
+  classifyTranscript,
   type GeneratedScenarioPayload,
   type CallScenarioInput,
   type CrimeRecord,
@@ -62,7 +63,7 @@ import type {
 } from "@/lib/types"
 import type { MapPoint } from "@/lib/map-types"
 import { SFMap } from "@/components/sf-map"
-import { cn } from "@/lib/utils"
+import { cn, splitIntoPhraseChunks } from "@/lib/utils"
 import {
   SIM_SECONDS_PER_TICK,
   CRIME_RESOLVE_RADIUS_DEG,
@@ -71,7 +72,8 @@ import {
   CRIME_SIM_CLOCK_SPEEDUP,
 } from "@/lib/simulation-constants"
 
-const UNKNOWN = "Unknown"
+/** Delay (ms) before each phrase chunk is revealed during TTS playback. */
+const CHUNK_REVEAL_DELAY_MS = 350
 
 /** Default 911 call point (used when no scenario location). */
 const DEFAULT_911_POINT: MapPoint = {
@@ -88,7 +90,7 @@ const DEFAULT_911_POINT: MapPoint = {
 
 /**
  * Infer what 911 info the caller has revealed from the conversation.
- * Returns which fields to show (revealed value or UNKNOWN) for the map popup.
+ * Returns which fields to show when revealed; empty string when not revealed.
  */
 function getRevealed911Info(
   payload: GeneratedScenarioPayload | null,
@@ -123,9 +125,9 @@ function getRevealed911Info(
       callerMessages.length >= 2)
 
   return {
-    location: noScenario ? "" : hasLocation ? loc : UNKNOWN,
-    description: noScenario ? "" : hasDescription ? description : UNKNOWN,
-    callerName: noScenario ? "" : hasName ? name : UNKNOWN,
+    location: noScenario ? "" : hasLocation ? loc : "",
+    description: noScenario ? "" : hasDescription ? description : "",
+    callerName: noScenario ? "" : hasName ? name : "",
     timestamp: "",
   }
 }
@@ -136,13 +138,27 @@ function build911MapPoint(
   scenarioCallLocation: { lat: number; lng: number; address: string } | null,
   conversationHistory: { role: string; content: string }[],
   callActive: boolean,
-  callSeconds: number
+  callSeconds: number,
+  incidentLabel?: string
 ): MapPoint {
-  const loc = scenarioCallLocation ?? {
-    lat: DEFAULT_911_POINT.lat,
-    lng: DEFAULT_911_POINT.lng,
-    address: DEFAULT_911_POINT.location ?? "San Francisco, CA",
-  }
+  // Use scenario location from generator (lat/lng in structured output); prefer scenarioCallLocation then payload.scenario.location
+  const fromPayload =
+    scenarioPayload?.scenario?.location &&
+    typeof scenarioPayload.scenario.location.lat === "number" &&
+    typeof scenarioPayload.scenario.location.lng === "number"
+      ? {
+          lat: scenarioPayload.scenario.location.lat,
+          lng: scenarioPayload.scenario.location.lng,
+          address: scenarioPayload.scenario.location.address ?? "San Francisco, CA",
+        }
+      : null
+  const loc =
+    scenarioCallLocation ??
+    fromPayload ?? {
+      lat: DEFAULT_911_POINT.lat,
+      lng: DEFAULT_911_POINT.lng,
+      address: DEFAULT_911_POINT.location ?? "San Francisco, CA",
+    }
   const callerMessages = conversationHistory
     .filter((t) => t.role === "caller")
     .map((t) => t.content)
@@ -162,6 +178,7 @@ function build911MapPoint(
       lng: loc.lng,
       location: loc.address,
       timestamp: callActive ? timestamp : DEFAULT_911_POINT.timestamp,
+      label: incidentLabel || undefined,
     }
   }
 
@@ -172,10 +189,11 @@ function build911MapPoint(
     lat: loc.lat,
     lng: loc.lng,
     location: revealed.location || loc.address,
-    description: revealed.description || s.title || UNKNOWN,
-    callerId: "—",
-    callerName: revealed.callerName || UNKNOWN,
+    description: revealed.description || "",
+    callerId: "",
+    callerName: revealed.callerName || "",
     timestamp,
+    label: incidentLabel || undefined,
   }
 }
 
@@ -413,7 +431,31 @@ export default function LiveSimulationPage({
   const [apiLoading, setApiLoading] = useState(false)
   const [apiError, setApiError] = useState<string | null>(null)
   const [notes, setNotes] = useState<NoteEntry[]>([])
-  const [mapPoints, setMapPoints] = useState<MapPoint[]>(() => getInitialMapPoints())
+  const [mapPoints, setMapPoints] = useState<MapPoint[]>(() => {
+    try {
+      const raw =
+        typeof sessionStorage !== "undefined" &&
+        sessionStorage.getItem(`${GENERATED_SCENARIO_STORAGE_KEY}-${sessionId}`)
+      if (raw) {
+        const payload = JSON.parse(raw) as GeneratedScenarioPayload
+        const loc = payload?.scenario?.location
+        if (
+          loc &&
+          typeof loc.lat === "number" &&
+          typeof loc.lng === "number"
+        ) {
+          return getInitialMapPoints({
+            lat: loc.lat,
+            lng: loc.lng,
+            address: loc.address ?? "San Francisco, CA",
+          })
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return getInitialMapPoints()
+  })
   const [selectedPointId, setSelectedPointId] = useState<string | null>(null)
   // SF crimes feed: visible until enough vehicles at scene for long enough
   const [crimesFromApi, setCrimesFromApi] = useState<CrimeRecord[]>([])
@@ -449,6 +491,10 @@ export default function LiveSimulationPage({
     police?: string | null
     fire?: string | null
   } | null>(null)
+  /** Last visible chunk index for active caller turn (progressive transcript reveal). */
+  const [activeCallerVisibleChunks, setActiveCallerVisibleChunks] = useState(-1)
+  /** Short incident label from transcript classifier (caller words only); used for 911 map label. */
+  const [incidentLabel, setIncidentLabel] = useState<string>("")
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const tick30Ref = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -595,6 +641,30 @@ export default function LiveSimulationPage({
     dispatch(reduxSetConnectionStatus(connectionStatus))
   }, [connectionStatus, sessionId, reduxCall.sessionId, dispatch])
 
+  // Classify transcript → short incident label (caller words only, no scenario context)
+  useEffect(() => {
+    const callerText = conversationHistory
+      .filter((t) => t.role === "caller")
+      .map((t) => t.content)
+      .join(" ")
+      .trim()
+    if (!callerText) {
+      setIncidentLabel("")
+      return
+    }
+    const t = setTimeout(() => {
+      classifyTranscript(callerText)
+        .then(({ label }) => setIncidentLabel(label || ""))
+        .catch(() => setIncidentLabel(""))
+    }, 600)
+    return () => clearTimeout(t)
+  }, [conversationHistory])
+
+  // Reset chunk visibility when new caller audio loads
+  useEffect(() => {
+    setActiveCallerVisibleChunks(-1)
+  }, [callerAudioUrl])
+
   // Fetch SF crimes for simulation day (one day from CSV, configurable speed playback)
   useEffect(() => {
     fetchCrimesDay()
@@ -607,12 +677,16 @@ export default function LiveSimulationPage({
       })
   }, [])
 
-  // Visible crimes: sim time passed and not yet resolved (resolved when enough vehicles at scene for long enough)
+  // Visible crimes: sim time passed, not yet resolved, and not UNKNOWN (hide unclassifiable labels)
   const crimeMapPoints = useMemo(() => {
     return crimesFromApi
       .filter(
         (c) =>
-          c.simSecondsFromMidnight <= crimeSimSeconds && !crimeResolvedIds.has(c.id)
+          c.simSecondsFromMidnight <= crimeSimSeconds &&
+          !crimeResolvedIds.has(c.id) &&
+          !c.isUnknown &&
+          c.displayLabel !== "UNKNOWN" &&
+          Boolean(c.category?.trim() || c.description?.trim())
       )
       .map((c) => ({
         id: c.id,
@@ -622,7 +696,9 @@ export default function LiveSimulationPage({
         location: c.category,
         description: c.address,
         callerId: c.description,
+        label: c.displayLabel,
         radiusScale: crimePopScales[c.id] ?? 1,
+        priority: c.priority ?? 2,
       }))
   }, [crimesFromApi, crimeSimSeconds, crimeResolvedIds, crimePopScales])
   crimePointsRef.current = crimeMapPoints
@@ -633,6 +709,15 @@ export default function LiveSimulationPage({
     return mapPoints.map((p) => ({ ...p, recommended: ids.has(p.id) }))
   }, [mapPoints, highlightedVehicleIds])
 
+  // Only show 911 call point on map after "Start call" is pressed
+  const mapPointsForDisplay = useMemo(
+    () =>
+      callActive
+        ? mapPointsWithRecommended
+        : mapPointsWithRecommended.filter((p) => p.type !== "911"),
+    [callActive, mapPointsWithRecommended]
+  )
+
   /** 911 call point for the map: scenario-based and updates as caller reveals info. */
   const current911Point = useMemo(
     () =>
@@ -641,7 +726,8 @@ export default function LiveSimulationPage({
         scenarioCallLocation,
         conversationHistory,
         callActive,
-        callSeconds
+        callSeconds,
+        incidentLabel
       ),
     [
       scenarioPayload,
@@ -649,9 +735,35 @@ export default function LiveSimulationPage({
       conversationHistory,
       callActive,
       callSeconds,
+      incidentLabel,
     ]
   )
   current911PointRef.current = current911Point
+
+  /** Last caller turn (currently playing) for progressive transcript reveal. */
+  const activeCallerTurn = useMemo(() => {
+    const callers = transcript.filter((t) => t.speaker === "caller")
+    return callers[callers.length - 1] ?? null
+  }, [transcript])
+
+  const activeCallerChunks = useMemo(
+    () => (activeCallerTurn ? splitIntoPhraseChunks(activeCallerTurn.text) : []),
+    [activeCallerTurn]
+  )
+
+  const handleAudioTimeUpdate = useCallback(
+    (currentTime: number, duration: number) => {
+      if (activeCallerChunks.length === 0 || duration <= 0) return
+      const delaySec = CHUNK_REVEAL_DELAY_MS / 1000
+      let visibleUpTo = -1
+      for (let i = 0; i < activeCallerChunks.length; i++) {
+        const chunkStart = (i / activeCallerChunks.length) * duration
+        if (currentTime >= chunkStart + delaySec) visibleUpTo = i
+      }
+      setActiveCallerVisibleChunks(visibleUpTo)
+    },
+    [activeCallerChunks]
+  )
 
   // Keep the 911 map point in sync with scenario + revealed caller info
   useEffect(() => {
@@ -967,6 +1079,19 @@ export default function LiveSimulationPage({
           notes: [],
         })
       )
+      // Pan and zoom map to 911 call point
+      const loc =
+        scenarioCallLocation ??
+        (scenarioPayload?.scenario?.location
+          ? {
+              lat: scenarioPayload.scenario.location.lat,
+              lng: scenarioPayload.scenario.location.lng,
+            }
+          : null)
+      setMapFlyToTarget({
+        lat: loc?.lat ?? DEFAULT_911_POINT.lat,
+        lng: loc?.lng ?? DEFAULT_911_POINT.lng,
+      })
     } catch (e) {
       setApiError(e instanceof Error ? e.message : "Failed to start call")
       setConnectionStatus("disconnected")
@@ -1043,6 +1168,8 @@ export default function LiveSimulationPage({
         description: scenario.description,
         difficulty: scenario.difficulty,
         language: scenario.language,
+        criticalInfo: scenario.criticalInfo,
+        expectedActions: scenario.expectedActions,
       },
       transcript,
       notes,
@@ -1317,7 +1444,7 @@ export default function LiveSimulationPage({
             <Card className="flex min-h-0 flex-1 flex-col overflow-hidden border bg-card">
               <div className="relative min-h-0 flex-1 w-full">
                 <SFMap
-                  points={mapPointsWithRecommended}
+                  points={mapPointsForDisplay}
                   selectedPointId={selectedPointId}
                   onSelectPoint={setSelectedPointId}
                   flyToTarget={mapFlyToTarget}
@@ -1365,11 +1492,21 @@ export default function LiveSimulationPage({
                 <CardTitle className="text-sm font-medium">Live transcription</CardTitle>
                 <div className="flex items-center gap-2 min-w-0 shrink-0">
                   <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Caller</span>
-                  <AudioControl audioUrl={callerAudioUrl} disabled={!callActive} compact />
+                  <AudioControl audioUrl={callerAudioUrl} disabled={!callActive} onTimeUpdate={handleAudioTimeUpdate} compact />
                 </div>
               </CardHeader>
               <div className="min-h-0 flex-1 overflow-hidden">
-                <TranscriptFeed turns={transcript} partialText={partialText} />
+                <TranscriptFeed
+                  turns={transcript}
+                  partialText={partialText}
+                  activeCallerTurnId={callerAudioUrl ? activeCallerTurn?.id : undefined}
+                  activeCallerChunks={
+                    callerAudioUrl && activeCallerChunks.length > 0 ? activeCallerChunks : undefined
+                  }
+                  activeCallerVisibleUpTo={
+                    callerAudioUrl && activeCallerChunks.length > 0 ? activeCallerVisibleChunks : undefined
+                  }
+                />
               </div>
               <div className="shrink-0 border-t flex flex-row flex-nowrap items-center gap-1 py-2 px-3">
                 <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground shrink-0 w-8">Mic</span>

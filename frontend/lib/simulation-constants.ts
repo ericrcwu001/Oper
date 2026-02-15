@@ -1,8 +1,8 @@
-/** Sim seconds per map tick. Higher = crimes appear more quickly. ~30fps × 4 ≈ 120 sim sec per real sec. */
+/** Sim seconds per map tick. Higher = crimes appear more quickly. ~30fps × 2 ≈ 60 sim sec per real sec. */
 export const SIM_SECONDS_PER_TICK = 4
 
-/** Display multiplier for crime sim clock (e.g. "Day: 3 (120×)"). */
-export const CRIME_SIM_CLOCK_SPEEDUP = 120
+/** Display multiplier for crime sim clock (e.g. "Day: 3 (60×)"). */
+export const CRIME_SIM_CLOCK_SPEEDUP = 60
 
 /** Max distance (approx degrees) for a vehicle to be “drawn” toward a crime (~0.006 deg ≈ 600 m in SF). */
 export const CRIME_ATTRACTION_RADIUS_DEG = 0.006

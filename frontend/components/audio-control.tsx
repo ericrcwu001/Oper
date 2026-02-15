@@ -11,6 +11,8 @@ interface AudioControlProps {
   disabled?: boolean
   /** Called when the current audio clip finishes playing. */
   onPlaybackEnd?: () => void
+  /** Called on audio timeupdate (throttled ~100ms) for transcript sync. */
+  onTimeUpdate?: (currentTime: number, duration: number) => void
   /** When true, use smaller button and slider for a tighter layout. */
   compact?: boolean
 }
@@ -19,11 +21,15 @@ export function AudioControl({
   audioUrl,
   disabled,
   onPlaybackEnd,
+  onTimeUpdate,
   compact = false,
 }: AudioControlProps) {
   const [playing, setPlaying] = useState(false)
   const [volume, setVolume] = useState([75])
   const audioRef = useRef<HTMLAudioElement>(null)
+  const lastTimeUpdateRef = useRef(0)
+  const onTimeUpdateRef = useRef(onTimeUpdate)
+  onTimeUpdateRef.current = onTimeUpdate
 
   // When a new audio URL is set, load and play it
   useEffect(() => {
@@ -47,6 +53,20 @@ export function AudioControl({
     const audio = audioRef.current
     if (audio) audio.volume = volume[0] / 100
   }, [volume])
+
+  // timeupdate handler for transcript sync (throttled ~100ms)
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio || !onTimeUpdate) return
+    const handleTimeUpdate = () => {
+      const now = performance.now()
+      if (now - lastTimeUpdateRef.current < 100) return
+      lastTimeUpdateRef.current = now
+      onTimeUpdateRef.current?.(audio.currentTime, audio.duration)
+    }
+    audio.addEventListener("timeupdate", handleTimeUpdate)
+    return () => audio.removeEventListener("timeupdate", handleTimeUpdate)
+  }, [onTimeUpdate])
 
   const handlePlayPause = () => {
     const audio = audioRef.current

@@ -221,3 +221,39 @@ Scenario: ${scenario}${timeContext ? `\n\n${timeContext}` : ''}`;
 
   return reply;
 }
+
+/**
+ * Classify transcript into a short incident-type label for map display.
+ * Uses ONLY the transcript text (caller's words); no scenario context.
+ *
+ * @param {string} transcript - Caller messages joined (what the caller has actually said so far).
+ * @returns {Promise<string>} - 2–4 word label in ALL CAPS, e.g. "MASS SHOOTER", "HOSTAGE", "FIRE".
+ */
+export async function classifyTranscript(transcript) {
+  const text = typeof transcript === 'string' ? transcript.trim() : '';
+  if (!text) return '';
+
+  if (!config.openai.apiKey) {
+    return '';
+  }
+
+  const openai = new OpenAI({ apiKey: config.openai.apiKey });
+
+  const completion = await openai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    messages: [
+      {
+        role: 'system',
+        content: `You classify 911 call transcripts into a short incident type. Output ONLY a 2–4 word label in ALL CAPS. Examples: MASS SHOOTER, HOSTAGE, FIRE, CAR ACCIDENT, DOMESTIC VIOLENCE, OVERDOSE, ROBBERY, HEART ATTACK. Base your answer ONLY on what the caller has said in the transcript—do not infer from context or scenario. If the transcript is too vague, output the best guess from the words spoken. Output nothing else.`,
+      },
+      {
+        role: 'user',
+        content: `Transcript:\n${text.slice(0, 2000)}`,
+      },
+    ],
+    max_tokens: 30,
+  });
+
+  const label = completion.choices[0]?.message?.content?.trim();
+  return label ? label.toUpperCase().replace(/\n/g, ' ') : '';
+}

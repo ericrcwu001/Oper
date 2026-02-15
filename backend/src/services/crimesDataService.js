@@ -4,6 +4,8 @@
  */
 
 import fs from 'fs/promises';
+import { classifyCrime } from './crimeClassificationService.js';
+import { getPriorityFromCrime } from './dispatchPriorityService.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -88,8 +90,9 @@ async function loadCsvRows() {
 
 /**
  * Get crimes for a single day, sorted by time.
+ * Each crime includes priority (1–5) for map beacon height and label visibility.
  * @param {string} date - YYYY-MM-DD
- * @returns {Promise<Array<{ id: string, lat: number, lng: number, simSecondsFromMidnight: number, category?: string, address?: string }>>}
+ * @returns {Promise<Array<{ id: string, lat: number, lng: number, simSecondsFromMidnight: number, category?: string, address?: string, description?: string, displayLabel: string, isUnknown: boolean, priority: number }>>}
  */
 export async function getCrimesForDay(date) {
   const rows = await loadCsvRows();
@@ -97,15 +100,28 @@ export async function getCrimesForDay(date) {
   const dayRows = rows.filter((r) => r.date === normalized);
   dayRows.sort((a, b) => a.secondsFromMidnight - b.secondsFromMidnight);
 
-  return dayRows.map((r, i) => ({
-    id: `crime-${normalized}-${i}-${r.secondsFromMidnight}`,
-    lat: r.lat,
-    lng: r.lng,
-    simSecondsFromMidnight: r.secondsFromMidnight,
-    category: r.category,
-    address: r.address,
-    description: r.descript,
-  }));
+  const priorities = await Promise.all(
+    dayRows.map((r) => getPriorityFromCrime(r.category, r.descript))
+  );
+
+  return dayRows.map((r, i) => {
+    const { displayLabel, isUnknown } = classifyCrime({
+      category: r.category,
+      description: r.descript,
+    });
+    return {
+      id: `crime-${normalized}-${i}-${r.secondsFromMidnight}`,
+      lat: r.lat,
+      lng: r.lng,
+      simSecondsFromMidnight: r.secondsFromMidnight,
+      category: r.category,
+      address: r.address,
+      description: r.descript,
+      displayLabel,
+      isUnknown,
+      priority: priorities[i],
+    };
+  });
 }
 
 /**

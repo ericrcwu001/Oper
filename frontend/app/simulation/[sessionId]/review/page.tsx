@@ -80,14 +80,21 @@ export default function ReviewPage({
       const raw = sessionStorage.getItem(`${STORAGE_KEY_GENERATED}-${sessionId}`)
       if (raw) {
         const payload = JSON.parse(raw) as {
-          scenario?: { title?: string; description?: string }
+          scenario?: {
+            title?: string
+            description?: string
+            critical_info?: string[]
+            expected_actions?: string[]
+          }
           timeline?: Record<string, string>
         }
         if (payload?.scenario?.title != null) {
           setScenario((prev) => ({
-            ...(prev || {}),
+            ...prev,
             title: payload.scenario?.title ?? prev?.title,
             description: payload.scenario?.description ?? prev?.description,
+            criticalInfo: payload.scenario?.critical_info ?? prev?.criticalInfo ?? [],
+            expectedActions: payload.scenario?.expected_actions ?? prev?.expectedActions ?? [],
           }))
         }
         if (payload?.timeline != null && typeof payload.timeline === "object" && !Array.isArray(payload.timeline)) {
@@ -162,6 +169,8 @@ export default function ReviewPage({
               description: data.data.scenario?.description ?? prev.description,
               difficulty: (data.data.scenario?.difficulty as Difficulty) ?? prev.difficulty,
               language: (data.data.scenario?.language as Language) ?? prev.language,
+              criticalInfo: data.data.scenario?.criticalInfo ?? prev?.criticalInfo ?? [],
+              expectedActions: data.data.scenario?.expectedActions ?? prev?.expectedActions ?? [],
             }))
           }
           if (data.data.evaluation && typeof data.data.evaluation === "object") {
@@ -197,7 +206,9 @@ export default function ReviewPage({
       reviewTranscript,
       reviewNotes,
       scenario.description || "911 emergency call",
-      Object.keys(scenarioTimeline).length > 0 ? scenarioTimeline : undefined
+      Object.keys(scenarioTimeline).length > 0 ? scenarioTimeline : undefined,
+      scenario.expectedActions?.length ? scenario.expectedActions : undefined,
+      scenario.criticalInfo?.length ? scenario.criticalInfo : undefined
     )
       .then(async (e) => {
         if (!cancelled) {
@@ -215,6 +226,8 @@ export default function ReviewPage({
           description: scenario.description,
           difficulty: scenario.difficulty,
           language: scenario.language,
+          criticalInfo: scenario.criticalInfo,
+          expectedActions: scenario.expectedActions,
         }
         const timelinePayload =
           Object.keys(scenarioTimeline).length > 0 ? scenarioTimeline : undefined
@@ -246,6 +259,8 @@ export default function ReviewPage({
       description: scenario.description,
       difficulty: scenario.difficulty,
       language: scenario.language,
+      criticalInfo: scenario.criticalInfo,
+      expectedActions: scenario.expectedActions,
     }
     const timelinePayload =
       Object.keys(scenarioTimeline).length > 0 ? scenarioTimeline : undefined

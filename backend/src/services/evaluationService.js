@@ -10,9 +10,11 @@ import { getRelevantContext } from './ragService.js';
  * @param {Array<{ text: string, tag?: string, timestamp?: number }>} notes
  * @param {string} scenarioDescription
  * @param {Record<string, string>} [scenarioTimeline] - Optional map of seconds (string keys) to fixed external event descriptions.
+ * @param {string[]} [expectedActions] - Optional rubric of expected operator actions.
+ * @param {string[]} [criticalInfo] - Optional rubric of critical info to capture.
  * @returns {Promise<{ protocolAdherence: number, timeliness: number, criticalInfoCapture: number, overallScore: number, missedActions: string[], feedbackBullets: string[], transcriptHighlights: object[] }>}
  */
-export async function evaluateCall(transcript, notes, scenarioDescription, scenarioTimeline) {
+export async function evaluateCall(transcript, notes, scenarioDescription, scenarioTimeline, expectedActions, criticalInfo) {
   if (!config.openai.apiKey) {
     throw new Error('OPENAI_API_KEY is not set.');
   }
@@ -38,7 +40,30 @@ export async function evaluateCall(transcript, notes, scenarioDescription, scena
     console.warn('RAG retrieval failed, evaluating without reference docs:', err.message);
   }
 
-  const systemPrompt = `${ragContext}You are an expert 911 dispatch trainer. Evaluate the operator's performance based on the call transcript and the notes they took.${ragContext ? ' Use the reference material above to align scores and feedback with established 911 operator protocols and best practices.' : ''}
+  const rubricBlock =
+    (Array.isArray(expectedActions) && expectedActions.length > 0) || (Array.isArray(criticalInfo) && criticalInfo.length > 0)
+      ? `\n\nEXPECTED OPERATOR ACTIONS (check each):\n${(expectedActions || []).map((a) => `- ${a}`).join('\n')}\n\nCRITICAL INFORMATION TO CAPTURE (check each):\n${(criticalInfo || []).map((c) => `- ${c}`).join('\n')}\n\nScore against these rubrics. Each missed action or critical info item should lower the score.`
+      : '';
+
+  const systemPrompt = `${ragContext}You are an expert 911 dispatch trainer. Evaluate the operator's performance based on the call transcript and the notes they took. Be honest and strict. Do not inflate scores. Poor performance must receive low scores. Trainees need truthful feedback.${ragContext ? ' Use the reference material above to align scores and feedback with established 911 operator protocols and best practices.' : ''}
+
+SCORING CALIBRATION (use strictly):
+- Failing (overallScore 5-20): Operator said only a greeting ("hello", "hi", "911") or single short phrase; no location, nature, or actions. protocolAdherence 5-15, criticalInfoCapture 0-10, timeliness 5-15.
+- Poor (15-35): Answered and maybe asked 1-2 vague questions; no location or nature captured.
+- Below average (30-50): Got location OR nature of emergency, but not both; missed most critical info and expected actions.
+- Average (50-65): Got location and nature; captured some critical info; missed several expected actions.
+- Good (65-80): Most critical info captured; most expected actions done; minor gaps.
+- Strong (80-90): Nearly all critical info; nearly all expected actions; clear notes.
+- Excellent (90-100): Full protocol adherence; all critical info captured; all expected actions completed; caller kept calm and on line.
+
+Per-dimension: protocolAdherence 0-20 = no location/nature/stay-on-line/dispatch; 30-50 = got location OR nature, not both; 60-80 = location and nature, most steps; 90-100 = full protocol. criticalInfoCapture 0-20 = none captured; 30-50 = 1-2 items; 60-80 = most; 90-100 = all. timeliness 0-20 = long delays, no urgency; 30-50 = asked non-urgent before critical; 60-80 = generally timely; 90-100 = prioritized location and nature early.
+overallScore must reflect the weakest dimension when performance is poor—do not average up. A trainee who said only "hello" in a school shooter scenario must score 5-20 overall.
+
+FEEDBACK REQUIREMENTS:
+- feedbackBullets: 3-6 bullets. Each must be specific, actionable, and explain HOW to improve (not just what was wrong). If protocol adherence is low: explain how to adhere better (specific questions to ask, order of steps). If critical info capture is low: name which critical info was missed and suggest how to ask for it (e.g. "You didn't capture the number of victims. Ask: 'How many people are injured?'"). If timeliness is low: explain what to prioritize first. Avoid generic advice—the trainee should know exactly what to say or do differently.
+- missedActions: 0-5 items. State what should have been done; optionally append brief "how" (e.g. "Dispatch police and EMS—you could have said 'I'm sending help now'").
+- transcriptHighlights: For negative highlights (missed_action, red_flag), the "detail" field must explain what to do instead, not just that something was wrong (e.g. "At this point you should have asked: 'What is your exact address?' or 'What cross streets are you near?'").
+
 Return a JSON object only, no other text, with this exact structure:
 {
   "protocolAdherence": <number 0-100>,
@@ -48,17 +73,11 @@ Return a JSON object only, no other text, with this exact structure:
   "missedActions": [<string>, ...],
   "feedbackBullets": [<string>, ...],
   "transcriptHighlights": [
-    { "turnIndex": <number>, "type": "missed_action" | "red_flag" | "improvement" | "good_move", "label": "<short string>", "detail": "<optional 1-2 sentences>" },
+    { "turnIndex": <number>, "type": "missed_action" | "red_flag" | "improvement" | "good_move", "label": "<short string>", "detail": "<what to do instead for negative types; optional for good_move>" },
     ...
   ]
 }
-- protocolAdherence: Did they follow standard 911 protocol (location, nature of emergency, stay on line, dispatch, etc.)?
-- timeliness: Did they gather key info and dispatch in a timely way?
-- criticalInfoCapture: Did they capture critical info (address, injuries, hazards) and note it?
-- overallScore: Overall performance (can be average of the three or your judgment).
-- missedActions: 0-5 short strings describing what they should have done but didn't. Empty array if none.
-- feedbackBullets: 2-5 short, constructive feedback sentences.
-- transcriptHighlights: Link feedback to specific OPERATOR turns only. Use the number in brackets at the start of each transcript line as turnIndex (0-based). CRITICAL: Only use turnIndex for lines where the speaker is "operator"—never attach highlights to caller lines. Include both constructive and positive feedback. type: "missed_action" = should have done something here; "red_flag" = concerning or risky; "improvement" = could have been better (softer); "good_move" = something the operator did well (e.g. calm tone, got location, reassured caller). At most ONE negative highlight (missed_action or red_flag) per operator turn; you may include one improvement and one good_move per turn. label: very short; detail: optional. 0-10 items total.`;
+- transcriptHighlights: Link to OPERATOR turns only. Use the number in brackets at the start of each transcript line as turnIndex (0-based). Only use turnIndex for lines where speaker is "operator". At most ONE negative highlight per operator turn. 0-10 items total.`;
 
   const timelineBlock =
     scenarioTimeline &&
@@ -71,7 +90,7 @@ Return a JSON object only, no other text, with this exact structure:
           .join('\n')}`
       : '';
 
-  const userPrompt = `Scenario context: ${scenarioDescription}${timelineBlock}
+  const userPrompt = `Scenario context: ${scenarioDescription}${timelineBlock}${rubricBlock}
 
 CALL TRANSCRIPT (number in brackets is turnIndex for transcriptHighlights):
 ${transcriptWithIndices || '(No transcript)'}
@@ -87,7 +106,7 @@ Evaluate and return the JSON object only.`;
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ],
-    max_tokens: 900,
+    max_tokens: 1200,
   });
 
   const raw = completion.choices[0]?.message?.content?.trim();

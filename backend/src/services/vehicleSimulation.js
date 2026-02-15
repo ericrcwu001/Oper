@@ -18,7 +18,7 @@ const GRAPH_PATH = path.join(DATA_DIR, "sf-roads-graph.json");
 const VEHICLE_POSITIONS_PATH = path.join(DATA_DIR, "vehicle-positions.json");
 
 const COUNTS = { fire: 25, police: 180, ambulance: 12 };
-const SPEED_BASE = { fire: 13, police: 11, ambulance: 13 };
+const SPEED_BASE = { fire: 19.5, police: 16.5, ambulance: 19.5 }; // 50% faster than original
 const SPEED_VARIANCE = 0.15;
 const DT_SECONDS = 0.1;
 // Pause at natural stop areas (intersections): probability and duration

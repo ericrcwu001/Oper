@@ -368,13 +368,14 @@ router.post('/interact', async (req, res) => {
 /**
  * POST /evaluate
  *
- * Body: { transcript, notes, scenarioDescription, scenarioTimeline?: Record<string, string> }
+ * Body: { transcript, notes, scenarioDescription, scenarioTimeline?, expectedActions?, criticalInfo? }
  * scenarioTimeline: optional map of seconds (string keys) to event descriptions (fixed external events).
- * Returns: { protocolAdherence, timeliness, criticalInfoCapture, overallScore, missedActions, feedbackBullets }
+ * expectedActions, criticalInfo: optional rubric for strict scoring.
+ * Returns: { protocolAdherence, timeliness, criticalInfoCapture, overallScore, missedActions, feedbackBullets, transcriptHighlights }
  */
 router.post('/evaluate', async (req, res) => {
   try {
-    const { transcript, notes, scenarioDescription, scenarioTimeline } = req.body;
+    const { transcript, notes, scenarioDescription, scenarioTimeline, expectedActions, criticalInfo } = req.body;
     if (!Array.isArray(transcript)) {
       return res.status(400).json({ error: 'Missing or invalid "transcript" array.' });
     }
@@ -386,7 +387,17 @@ router.post('/evaluate', async (req, res) => {
       scenarioTimeline != null && typeof scenarioTimeline === 'object' && !Array.isArray(scenarioTimeline)
         ? scenarioTimeline
         : undefined;
-    const evaluation = await evaluateCall(transcript, notes, scenario || '911 emergency call.', timeline);
+    const expActions =
+      Array.isArray(expectedActions) && expectedActions.length > 0 ? expectedActions : undefined;
+    const critInfo = Array.isArray(criticalInfo) && criticalInfo.length > 0 ? criticalInfo : undefined;
+    const evaluation = await evaluateCall(
+      transcript,
+      notes,
+      scenario || '911 emergency call.',
+      timeline,
+      expActions,
+      critInfo
+    );
     return res.status(200).json(evaluation);
   } catch (err) {
     console.error('evaluate error:', err.message);

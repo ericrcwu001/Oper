@@ -10,4 +10,7 @@ treehacks/backend/generated-audio/
 
 # Simulated vehicle positions (runtime output)
 backend/data/vehicle-positions.json
+
+# Font download cache for glyph generation
+frontend/.font-temp/
 .pmtiles-cli/

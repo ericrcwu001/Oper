@@ -6,6 +6,7 @@
 import OpenAI from 'openai';
 import { config } from '../config.js';
 import { getRelevantContext } from './ragService.js';
+import { getSituationPriority, priorityToDispatch } from './dispatchPriorityService.js';
 
 const VALID_UNITS = ['EMT_BLS', 'ALS', 'Police', 'Fire', 'SWAT'];
 const VALID_SEVERITIES = ['low', 'medium', 'high', 'critical'];
@@ -72,10 +73,10 @@ function getStageFromTranscriptLength(transcript) {
 /**
  * Call LLM to analyze caller transcript and return dispatch recommendations.
  * Uses RAG (ragDocs) to ground recommendations in 911 protocols.
- * Optionally includes a live resource snapshot (closest available units + ETA).
+ * IMPORTANT: Recommendations are based ONLY on the transcript—no scenario info (e.g. incident location).
  *
  * @param {string} transcript - Full caller-side transcript from the live call.
- * @param {{ resourceSummary?: string }} [options] - Optional. resourceSummary: closest-available units and ETAs for the LLM.
+ * @param {{ resourceSummary?: string }} [options] - Deprecated. resourceSummary is NOT used (would leak scenario info). Kept for API compat.
  * @returns {Promise<{ units: Array<{ unit: string, rationale?: string, severity?: string }>, severity: string, critical?: boolean, suggestedCount?: number, stage?: string, latestTrigger?: Array<{ rationale: string, severity: string }>, resourceContextUsed?: string }>}
  */
 export async function assessTranscriptWithLLM(transcript, options = {}) {
@@ -83,7 +84,8 @@ export async function assessTranscriptWithLLM(transcript, options = {}) {
     throw new Error('OPENAI_API_KEY is not set. Live evaluation requires an API key.');
   }
 
-  const resourceSummary = typeof options.resourceSummary === 'string' ? options.resourceSummary : '';
+  // Do NOT use resourceSummary—it comes from scenario incidentLocation and would leak scenario info.
+  // Dispatch recommendations must be based ONLY on the transcript at the time.
 
   const text = (transcript || '').trim();
   let ragContext = '';
@@ -96,7 +98,9 @@ export async function assessTranscriptWithLLM(transcript, options = {}) {
 
   const openai = new OpenAI({ apiKey: config.openai.apiKey });
 
-  const systemPrompt = `${ragContext}You are an expert 911 dispatcher. Analyze the CALLER transcript from an ongoing emergency call and recommend which units to dispatch. Use only the reference material above (if provided) to align with 911 protocols and best practices.
+  const systemPrompt = `${ragContext}You are an expert 911 dispatcher. Analyze the CALLER transcript from an ongoing emergency call and recommend which units to dispatch.
+
+CRITICAL: Base your recommendations ONLY on what the caller has actually said in the transcript. Do NOT use any scenario context, incident location, or external information. If the caller has not yet given an address or key details, reflect that in your recommendations (e.g. preliminary stage, fewer units). Use only the reference material above (if provided) to align with 911 protocols and best practices.
 
 Output a JSON object only, no other text. Use this exact structure:
 {
@@ -118,11 +122,7 @@ Rules:
 - suggestedCount: optional; only include if the caller indicated number of victims/patients (e.g. "two people down" -> 2).
 - latestTrigger: 0-3 items summarizing what in the caller's most recent statements (last sentence or two) drove the recommendation; use this so the UI can show "Just in" updates.`;
 
-  let userPrompt = `CALLER TRANSCRIPT (operator has been speaking with this person; analyze for dispatch):\n\n${text || '(No transcript yet.)'}`;
-  if (resourceSummary) {
-    userPrompt += `\n\nLIVE RESOURCE SNAPSHOT (closest available units by distance and ETA):\n${resourceSummary}\n\nUse this to recommend specific units when appropriate and to state who is closest / ETA.`;
-  }
-  userPrompt += '\n\nReturn the JSON object only.';
+  const userPrompt = `CALLER TRANSCRIPT (operator has been speaking with this person; analyze for dispatch—use ONLY what the caller has said, no other context):\n\n${text || '(No transcript yet.)'}\n\nReturn the JSON object only.`;
 
   const completion = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
@@ -147,6 +147,25 @@ Rules:
   const stage = getStageFromTranscriptLength(transcript);
   const out = normalizeResponse(parsed, transcript);
   if (!out.stage) out.stage = stage;
-  if (resourceSummary) out.resourceContextUsed = resourceSummary;
+
+  // Override suggestedCount and severity from priority (transcript classification)
+  try {
+    const priority = await getSituationPriority(text);
+    const { suggestedCount: priorityCount, severity: prioritySeverity, critical: priorityCritical } = priorityToDispatch(priority);
+    out.suggestedCount = priorityCount;
+    out.severity = prioritySeverity;
+    out.critical = priorityCritical;
+    // If LLM inferred more units from victim count (e.g. "five people shot"), use at least that many
+    const llmCount =
+      typeof parsed.suggestedCount === 'number' && Number.isInteger(parsed.suggestedCount)
+        ? Math.min(10, Math.max(1, parsed.suggestedCount))
+        : 0;
+    if (llmCount > (out.suggestedCount ?? 0)) {
+      out.suggestedCount = llmCount;
+    }
+  } catch (err) {
+    console.warn('Dispatch priority override failed, using LLM response:', err.message);
+  }
+
   return out;
 }

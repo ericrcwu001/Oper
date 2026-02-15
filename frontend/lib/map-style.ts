@@ -5,6 +5,7 @@ import { PMTILES_URL } from "./map-constants"
 export function getSFMapStyle(): StyleSpecification {
   return {
     version: 8,
+    glyphs: "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf",
     sources: {
       protomaps: {
         type: "vector",
