@@ -71,6 +71,7 @@ import {
   SIM_SECONDS_AT_SCENE_TO_RESOLVE,
   CRIME_SIM_CLOCK_SPEEDUP,
 } from "@/lib/simulation-constants"
+import { CRIME_BEACON_MIN_SEPARATION_DEG } from "@/lib/map-constants"
 
 /** Delay (ms) before each phrase chunk is revealed during TTS playback. */
 const CHUNK_REVEAL_DELAY_MS = 350
@@ -677,29 +678,41 @@ export default function LiveSimulationPage({
       })
   }, [])
 
-  // Visible crimes: sim time passed, not yet resolved, and not UNKNOWN (hide unclassifiable labels)
+  // Visible crimes: sim time passed, not yet resolved, and not UNKNOWN (hide unclassifiable labels).
+  // Skip crimes that would overlap another crime's beacon (too proximate).
   const crimeMapPoints = useMemo(() => {
-    return crimesFromApi
-      .filter(
-        (c) =>
-          c.simSecondsFromMidnight <= crimeSimSeconds &&
-          !crimeResolvedIds.has(c.id) &&
-          !c.isUnknown &&
-          c.displayLabel !== "UNKNOWN" &&
-          Boolean(c.category?.trim() || c.description?.trim())
-      )
-      .map((c) => ({
-        id: c.id,
-        type: "crime" as const,
-        lat: c.lat,
-        lng: c.lng,
-        location: c.category,
-        description: c.address,
-        callerId: c.description,
-        label: c.displayLabel,
-        radiusScale: crimePopScales[c.id] ?? 1,
-        priority: c.priority ?? 2,
-      }))
+    const eligible = crimesFromApi.filter(
+      (c) =>
+        c.simSecondsFromMidnight <= crimeSimSeconds &&
+        !crimeResolvedIds.has(c.id) &&
+        !c.isUnknown &&
+        c.displayLabel !== "UNKNOWN" &&
+        Boolean(c.category?.trim() || c.description?.trim())
+    )
+    const sep2 = CRIME_BEACON_MIN_SEPARATION_DEG * CRIME_BEACON_MIN_SEPARATION_DEG
+    const points: MapPoint[] = []
+    for (const c of eligible) {
+      const tooClose = points.some((p) => {
+        const dlat = p.lat - c.lat
+        const dlng = p.lng - c.lng
+        return dlat * dlat + dlng * dlng < sep2
+      })
+      if (!tooClose) {
+        points.push({
+          id: c.id,
+          type: "crime",
+          lat: c.lat,
+          lng: c.lng,
+          location: c.category,
+          description: c.address,
+          callerId: c.description,
+          label: c.displayLabel,
+          radiusScale: crimePopScales[c.id] ?? 1,
+          priority: c.priority ?? 2,
+        })
+      }
+    }
+    return points
   }, [crimesFromApi, crimeSimSeconds, crimeResolvedIds, crimePopScales])
   crimePointsRef.current = crimeMapPoints
 

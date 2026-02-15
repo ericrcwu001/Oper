@@ -20,6 +20,7 @@ import {
   MAP_POINT_CRIME_BEACON_HEIGHT_M,
   MAP_POINT_CRIME_BEACON_HEIGHT_BY_PRIORITY,
   MAP_POINT_CRIME_BEACON_COLOR,
+  MAP_POINT_CRIME_BEACON_OPACITY_BY_PRIORITY,
   MAP_POINT_CRIME_BEACON_FOOTPRINT,
   MAP_LABEL_ZOOM_CRIME_BY_PRIORITY,
   MAP_LABEL_ZOOM_CRIME,
@@ -185,7 +186,8 @@ function circleToRing(centerLng: number, centerLat: number, radiusDegLon: number
   return ring
 }
 
-/** Create an ellipse polygon ring (for 3D perspective). radiusLonDeg = horizontal, radiusLatDeg = vertical (compressed by pitch). */
+/** Create an ellipse polygon ring (for 3D perspective). radiusLonDeg = horizontal, radiusLatDeg = vertical.
+ * Uses latScale so the ellipse matches the circle's apparent size at transition (circle uses cos(lat) for lat extent). */
 function ellipseToRing(
   centerLng: number,
   centerLat: number,
@@ -193,12 +195,13 @@ function ellipseToRing(
   radiusLatDeg: number,
   segments = 32
 ): [number, number][] {
+  const latScale = Math.cos((centerLat * Math.PI) / 180) // match circleToRing so transition is seamless
   const ring: [number, number][] = []
   for (let i = 0; i <= segments; i++) {
     const θ = -(2 * Math.PI * i) / segments
     ring.push([
       centerLng + radiusLonDeg * Math.cos(θ),
-      centerLat + radiusLatDeg * Math.sin(θ),
+      centerLat + radiusLatDeg * latScale * Math.sin(θ),
     ])
   }
   return ring
@@ -218,6 +221,9 @@ function getRadiusPxForPoint(
   return radiusAtZoom(levels, zoom)
 }
 
+/** Scale factor for ellipse radii. Geographic-degree polygons can render larger than circle px; scale down for seamless transition. */
+const ELLIPSE_RADIUS_SCALE = 0.8
+
 /** Ellipse GeoJSON for all points; when pitch > 0, lat radius is compressed so points appear as ovals in 3D. */
 function pointsToEllipseGeoJSON(
   points: MapPoint[],
@@ -228,7 +234,7 @@ function pointsToEllipseGeoJSON(
   const cosPitch = Math.max(0.1, Math.cos((pitchDeg * Math.PI) / 180))
   const features: GeoJSON.Feature<GeoJSON.Polygon>[] = points.map((p) => {
     const selected = p.id === selectedPointId
-    const radiusPx = getRadiusPxForPoint(zoom, p.type, selected)
+    const radiusPx = getRadiusPxForPoint(zoom, p.type, selected) * ELLIPSE_RADIUS_SCALE
     const radiusLonDeg = beaconRadiusDegrees(zoom, p.lat, radiusPx)
     const radiusLatDeg = radiusLonDeg * cosPitch
     return {
@@ -279,7 +285,7 @@ function pointsCrimeToBeaconGeoJSON(points: MapPoint[], zoom: number, radiusPx: 
         type: "Feature",
         id: p.id,
         geometry: { type: "Polygon", coordinates: [circleToRing(p.lng, p.lat, radiusDeg)] },
-        properties: { id: p.id, height },
+        properties: { id: p.id, height, priority },
       }
     })
   return { type: "FeatureCollection", features }
@@ -310,10 +316,10 @@ const POINTS_ELLIPSE_LAYER_SELECTED_ID = "map-points-ellipses-fill-selected"
 const POINTS_ELLIPSE_LAYER_SELECTED_UNIT_ID = "map-points-ellipses-fill-selected-unit"
 const POINTS_ELLIPSE_LAYER_911_ID = "map-points-ellipses-fill-911"
 const POINTS_ELLIPSE_LAYER_SELECTED_911_ID = "map-points-ellipses-fill-selected-911"
-const PITCH_ELLIPSE_THRESHOLD_DEG = 5
+const PITCH_ELLIPSE_THRESHOLD_DEG = 10
 /** Hysteresis: use ellipses above this pitch, use circles below PITCH_USE_CIRCLE_DEG. Avoids flicker at threshold. */
-const PITCH_USE_ELLIPSE_DEG = 8
-const PITCH_USE_CIRCLE_DEG = 3
+const PITCH_USE_ELLIPSE_DEG = 13
+const PITCH_USE_CIRCLE_DEG = 8
 
 const FILTER_UNIT: maplibregl.FilterSpecification = [
   "any",
@@ -737,8 +743,22 @@ export function SFMap({
               ["get", "height"],
               MAP_POINT_CRIME_BEACON_HEIGHT_M,
             ],
-            "fill-extrusion-color": MAP_POINT_CRIME_BEACON_COLOR,
-            "fill-extrusion-opacity": 0.85,
+            "fill-extrusion-color": [
+              "match",
+              ["coalesce", ["get", "priority"], 2],
+              1,
+              ["rgba", 253, 224, 71, MAP_POINT_CRIME_BEACON_OPACITY_BY_PRIORITY[1]],
+              2,
+              ["rgba", 253, 224, 71, MAP_POINT_CRIME_BEACON_OPACITY_BY_PRIORITY[2]],
+              3,
+              ["rgba", 253, 224, 71, MAP_POINT_CRIME_BEACON_OPACITY_BY_PRIORITY[3]],
+              4,
+              ["rgba", 253, 224, 71, MAP_POINT_CRIME_BEACON_OPACITY_BY_PRIORITY[4]],
+              5,
+              ["rgba", 253, 224, 71, MAP_POINT_CRIME_BEACON_OPACITY_BY_PRIORITY[5]],
+              ["rgba", 253, 224, 71, 0.65],
+            ],
+            "fill-extrusion-opacity": 1,
           },
         })
       } catch {
