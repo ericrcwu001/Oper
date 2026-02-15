@@ -2,13 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import {
-  Phone,
-  LayoutDashboard,
-  Radio,
-  Menu,
-  X,
-} from "lucide-react"
+import { Phone, LayoutDashboard, Radio, PanelLeftClose } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { useState } from "react"
@@ -18,85 +12,94 @@ const navItems = [
   { href: "/simulation", label: "Call", icon: Phone },
 ]
 
+const SIDEBAR_WIDTH = "12rem" /* 192px — thin rail */
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
-  const [mobileOpen, setMobileOpen] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <header className="sticky top-0 z-50 border-b bg-card/80 backdrop-blur-md">
-        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 lg:px-6">
-          <Link href="/dashboard" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-              <Radio className="h-4 w-4 text-primary-foreground" />
-            </div>
-            <span className="text-lg font-semibold tracking-tight text-foreground">
-              911Sim
-            </span>
-          </Link>
-
-          <nav className="hidden items-center gap-1 md:flex">
+    <div className="flex min-h-screen flex-col bg-background">
+      {/* Thin sidebar: no overlay, main content shifts */}
+      <aside
+        className={cn(
+          "fixed left-0 top-0 z-30 flex h-full flex-col border-r border-border/40 bg-background/95 backdrop-blur-sm transition-[width] duration-200 ease-out",
+          sidebarOpen ? "w-[var(--sidebar-w)]" : "w-0 overflow-hidden"
+        )}
+        style={{ "--sidebar-w": SIDEBAR_WIDTH } as React.CSSProperties}
+      >
+        <div className="flex h-full w-[var(--sidebar-w)] min-w-[var(--sidebar-w)] flex-col">
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/30 px-3 py-3">
+            <Link
+              href="/dashboard"
+              onClick={() => setSidebarOpen(false)}
+              className="flex min-w-0 items-center gap-2 text-foreground no-underline"
+            >
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/90">
+                <Radio className="h-3.5 w-3.5 text-primary-foreground" />
+              </div>
+              <span className="truncate text-sm font-medium">911Sim</span>
+            </Link>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setSidebarOpen(false)}
+              className="h-7 w-7 shrink-0 rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+              aria-label="Close sidebar"
+            >
+              <PanelLeftClose className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+          <nav className="flex flex-1 flex-col gap-0.5 p-2">
             {navItems.map((item) => {
-              const isActive = pathname === item.href || pathname.startsWith(item.href + "/")
+              const isActive =
+                pathname === item.href ||
+                pathname.startsWith(item.href + "/")
               return (
                 <Link
                   key={item.href}
                   href={item.href}
+                  onClick={() => setSidebarOpen(false)}
                   className={cn(
-                    "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                    "flex items-center gap-2 rounded-md px-2.5 py-2 text-sm transition-colors",
                     isActive
-                      ? "bg-primary/10 text-primary"
-                      : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+                      ? "bg-muted/80 text-foreground"
+                      : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                   )}
                 >
-                  <item.icon className="h-4 w-4" />
-                  {item.label}
+                  <item.icon className="h-4 w-4 shrink-0 opacity-80" />
+                  <span className="truncate">{item.label}</span>
                 </Link>
               )
             })}
           </nav>
+        </div>
+      </aside>
 
+      {/* Trigger when sidebar closed */}
+      {!sidebarOpen && (
+        <div className="fixed left-3 top-3 z-40">
           <Button
             variant="ghost"
             size="icon"
-            className="md:hidden"
-            onClick={() => setMobileOpen(!mobileOpen)}
-            aria-label="Toggle navigation menu"
+            onClick={() => setSidebarOpen(true)}
+            className="h-8 w-8 rounded-lg border border-border/40 bg-background/80 text-muted-foreground shadow-sm backdrop-blur-sm hover:border-border hover:bg-muted/50 hover:text-foreground"
+            aria-label="Open navigation"
           >
-            {mobileOpen ? (
-              <X className="h-5 w-5" />
-            ) : (
-              <Menu className="h-5 w-5" />
-            )}
+            <PanelLeftClose className="h-4 w-4 rotate-180" />
           </Button>
         </div>
+      )}
 
-        {mobileOpen && (
-          <nav className="border-t bg-card px-4 pb-4 pt-2 md:hidden">
-            {navItems.map((item) => {
-              const isActive = pathname === item.href || pathname.startsWith(item.href + "/")
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={() => setMobileOpen(false)}
-                  className={cn(
-                    "flex items-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
-                    isActive
-                      ? "bg-primary/10 text-primary"
-                      : "text-muted-foreground hover:bg-secondary hover:text-foreground"
-                  )}
-                >
-                  <item.icon className="h-4 w-4" />
-                  {item.label}
-                </Link>
-              )
-            })}
-          </nav>
-        )}
-      </header>
-
-      <main className="flex-1">{children}</main>
+      {/* Main content shifts right when sidebar open — no darkening */}
+      <main
+        className="flex-1 transition-[margin-left] duration-200 ease-out"
+        style={{
+          marginLeft: sidebarOpen ? SIDEBAR_WIDTH : 0,
+        }}
+      >
+        {children}
+      </main>
     </div>
   )
 }

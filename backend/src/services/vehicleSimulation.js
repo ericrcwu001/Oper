@@ -70,7 +70,7 @@ function spawnVehicles(g) {
       const t = Math.random();
       const towardEnd = Math.random() < 0.5;
       const id = `${type}-${i + 1}`;
-      const { name: officerInCharge, status } = getOfficerForUnit(id);
+      const { name: officerInCharge } = getOfficerForUnit(id);
       list.push({
         id,
         type,
@@ -81,7 +81,7 @@ function spawnVehicles(g) {
         speedMetersPerSecond: randomSpeed(type),
         pauseRemainingSeconds: 0,
         officerInCharge,
-        status,
+        status: 0, // 0 = idle, 1 = en route (set when moving toward a crime)
       });
     }
   }
@@ -101,6 +101,7 @@ function pickNextEdge(g, v) {
 
   const atPos = nodes[atNode];
   if (!atPos || activeCrimes.length === 0) {
+    v.status = 0;
     const nextEdgeIdx = incident[Math.floor(Math.random() * incident.length)];
     const nextEdge = edges[nextEdgeIdx];
     const fromNext = nextEdge.fromNodeIdx === atNode;
@@ -122,6 +123,7 @@ function pickNextEdge(g, v) {
   }
 
   if (!nearestCrime) {
+    v.status = 0;
     const nextEdgeIdx = incident[Math.floor(Math.random() * incident.length)];
     const nextEdge = edges[nextEdgeIdx];
     const fromNext = nextEdge.fromNodeIdx === atNode;
@@ -146,6 +148,7 @@ function pickNextEdge(g, v) {
       bestEdgeIdx = ei;
     }
   }
+  v.status = 1; // en route to crime
   const nextEdge = edges[bestEdgeIdx];
   const fromNext = nextEdge.fromNodeIdx === atNode;
   v.currentEdge = bestEdgeIdx;
@@ -271,8 +274,13 @@ export function getPositions() {
 
 /**
  * Set active crime locations so vehicles within ATTRACTION_RADIUS_M steer toward them.
+ * When crimes are cleared, any vehicle that was en route is set back to idle (status 0).
  * @param {Array<{ lat: number, lng: number }>} crimes
  */
 export function setActiveCrimes(crimes) {
-  activeCrimes = Array.isArray(crimes) ? crimes : [];
+  const next = Array.isArray(crimes) ? crimes : [];
+  if (next.length === 0 && vehicles.length > 0) {
+    for (const v of vehicles) v.status = 0;
+  }
+  activeCrimes = next;
 }

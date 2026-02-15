@@ -50,7 +50,7 @@ export default function SimulationSetupPage() {
 
   return (
     <AppShell>
-      <div className="mx-auto max-w-7xl px-4 py-10 lg:px-6">
+      <div className="mx-auto max-w-7xl pl-14 pr-4 py-10 lg:pl-16 lg:pr-6">
         <div className="mb-8">
           <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
             Call Setup
