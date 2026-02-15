@@ -20,6 +20,7 @@ import {
   MAP_POINT_CRIME_BEACON_HEIGHT_M,
   MAP_POINT_CRIME_BEACON_HEIGHT_BY_PRIORITY,
   MAP_POINT_CRIME_BEACON_COLOR,
+  MAP_POINT_CRIME_BEACON_OPACITY_BY_PRIORITY,
   MAP_POINT_CRIME_BEACON_FOOTPRINT,
   MAP_LABEL_ZOOM_CRIME_BY_PRIORITY,
   MAP_LABEL_ZOOM_CRIME,
@@ -27,10 +28,14 @@ import {
   CRIME_POINT_STROKE_COLOR,
   MAP_POINT_RECOMMENDED_STROKE_COLOR,
   MAP_POINT_RECOMMENDED_RING_RADIUS_BY_ZOOM,
+  MAP_POINT_UNIT_IDLE_RADIUS_SCALE,
   MAP_LABEL_ZOOM_911,
   MAP_LABEL_ZOOM_UNITS,
+  MAP_ROUTE_LINE_COLOR,
+  MAP_ROUTE_LINE_WIDTH,
 } from "@/lib/map-constants"
 import { getSFMapStyle } from "@/lib/map-style"
+import { fetchRoute } from "@/lib/api"
 
 let protocolRegistered = false
 function ensurePmtilesProtocol() {
@@ -185,7 +190,8 @@ function circleToRing(centerLng: number, centerLat: number, radiusDegLon: number
   return ring
 }
 
-/** Create an ellipse polygon ring (for 3D perspective). radiusLonDeg = horizontal, radiusLatDeg = vertical (compressed by pitch). */
+/** Create an ellipse polygon ring (for 3D perspective). radiusLonDeg = horizontal, radiusLatDeg = vertical.
+ * Uses latScale so the ellipse matches the circle's apparent size at transition (circle uses cos(lat) for lat extent). */
 function ellipseToRing(
   centerLng: number,
   centerLat: number,
@@ -193,12 +199,13 @@ function ellipseToRing(
   radiusLatDeg: number,
   segments = 32
 ): [number, number][] {
+  const latScale = Math.cos((centerLat * Math.PI) / 180) // match circleToRing so transition is seamless
   const ring: [number, number][] = []
   for (let i = 0; i <= segments; i++) {
     const θ = -(2 * Math.PI * i) / segments
     ring.push([
       centerLng + radiusLonDeg * Math.cos(θ),
-      centerLat + radiusLatDeg * Math.sin(θ),
+      centerLat + radiusLatDeg * latScale * Math.sin(θ),
     ])
   }
   return ring
@@ -218,6 +225,9 @@ function getRadiusPxForPoint(
   return radiusAtZoom(levels, zoom)
 }
 
+/** Scale factor for ellipse radii. Geographic-degree polygons can render larger than circle px; scale down for seamless transition. */
+const ELLIPSE_RADIUS_SCALE = 0.8
+
 /** Ellipse GeoJSON for all points; when pitch > 0, lat radius is compressed so points appear as ovals in 3D. */
 function pointsToEllipseGeoJSON(
   points: MapPoint[],
@@ -228,7 +238,10 @@ function pointsToEllipseGeoJSON(
   const cosPitch = Math.max(0.1, Math.cos((pitchDeg * Math.PI) / 180))
   const features: GeoJSON.Feature<GeoJSON.Polygon>[] = points.map((p) => {
     const selected = p.id === selectedPointId
-    const radiusPx = getRadiusPxForPoint(zoom, p.type, selected)
+    let radiusPx = getRadiusPxForPoint(zoom, p.type, selected) * ELLIPSE_RADIUS_SCALE
+    const isUnit = p.type === "police" || p.type === "fire" || p.type === "ambulance"
+    const isIdle = p.status !== 1 && p.status !== true
+    if (isUnit && isIdle) radiusPx *= MAP_POINT_UNIT_IDLE_RADIUS_SCALE
     const radiusLonDeg = beaconRadiusDegrees(zoom, p.lat, radiusPx)
     const radiusLatDeg = radiusLonDeg * cosPitch
     return {
@@ -279,7 +292,7 @@ function pointsCrimeToBeaconGeoJSON(points: MapPoint[], zoom: number, radiusPx: 
         type: "Feature",
         id: p.id,
         geometry: { type: "Polygon", coordinates: [circleToRing(p.lng, p.lat, radiusDeg)] },
-        properties: { id: p.id, height },
+        properties: { id: p.id, height, priority },
       }
     })
   return { type: "FeatureCollection", features }
@@ -288,8 +301,10 @@ function pointsCrimeToBeaconGeoJSON(points: MapPoint[], zoom: number, radiusPx: 
 const POINTS_SOURCE_ID = "map-points"
 const POINTS_LAYER_ID = "map-points-circles"
 const POINTS_LAYER_UNIT_ID = "map-points-circles-unit"
+const POINTS_LAYER_UNIT_IDLE_ID = "map-points-circles-unit-idle"
 const POINTS_LAYER_SELECTED_ID = "map-points-circles-selected"
 const POINTS_LAYER_SELECTED_UNIT_ID = "map-points-circles-selected-unit"
+const POINTS_LAYER_SELECTED_UNIT_IDLE_ID = "map-points-circles-selected-unit-idle"
 const POINTS_LAYER_911_ID = "map-points-circles-911"
 const POINTS_LAYER_SELECTED_911_ID = "map-points-circles-selected-911"
 const POINTS_LAYER_RECOMMENDED_ID = "map-points-circles-recommended"
@@ -303,6 +318,9 @@ const POINTS_LABELS_LAYER_911_ID = "map-points-labels-911"
 const POINTS_LABELS_LAYER_CRIME_ID = "map-points-labels-crime"
 const POINTS_LABELS_LAYER_UNITS_ID = "map-points-labels-units"
 
+const VEHICLE_ROUTE_SOURCE_ID = "vehicle-route-source"
+const VEHICLE_ROUTE_LAYER_ID = "vehicle-route-layer"
+
 const POINTS_ELLIPSE_SOURCE_ID = "map-points-ellipses"
 const POINTS_ELLIPSE_LAYER_ID = "map-points-ellipses-fill"
 const POINTS_ELLIPSE_LAYER_UNIT_ID = "map-points-ellipses-fill-unit"
@@ -310,10 +328,28 @@ const POINTS_ELLIPSE_LAYER_SELECTED_ID = "map-points-ellipses-fill-selected"
 const POINTS_ELLIPSE_LAYER_SELECTED_UNIT_ID = "map-points-ellipses-fill-selected-unit"
 const POINTS_ELLIPSE_LAYER_911_ID = "map-points-ellipses-fill-911"
 const POINTS_ELLIPSE_LAYER_SELECTED_911_ID = "map-points-ellipses-fill-selected-911"
-const PITCH_ELLIPSE_THRESHOLD_DEG = 5
+const PITCH_ELLIPSE_THRESHOLD_DEG = 10
 /** Hysteresis: use ellipses above this pitch, use circles below PITCH_USE_CIRCLE_DEG. Avoids flicker at threshold. */
-const PITCH_USE_ELLIPSE_DEG = 8
-const PITCH_USE_CIRCLE_DEG = 3
+const PITCH_USE_ELLIPSE_DEG = 13
+const PITCH_USE_CIRCLE_DEG = 8
+
+/** Layer IDs used for point hit-testing; filter by map.getLayer(id) before queryRenderedFeatures to avoid errors when style is still loading. */
+const POINTS_QUERY_LAYER_IDS = [
+  POINTS_LAYER_ID,
+  POINTS_LAYER_UNIT_ID,
+  POINTS_LAYER_UNIT_IDLE_ID,
+  POINTS_LAYER_SELECTED_ID,
+  POINTS_LAYER_SELECTED_UNIT_ID,
+  POINTS_LAYER_SELECTED_UNIT_IDLE_ID,
+  POINTS_LAYER_911_ID,
+  POINTS_LAYER_SELECTED_911_ID,
+  POINTS_ELLIPSE_LAYER_ID,
+  POINTS_ELLIPSE_LAYER_UNIT_ID,
+  POINTS_ELLIPSE_LAYER_SELECTED_ID,
+  POINTS_ELLIPSE_LAYER_SELECTED_UNIT_ID,
+  POINTS_ELLIPSE_LAYER_911_ID,
+  POINTS_ELLIPSE_LAYER_SELECTED_911_ID,
+] as const
 
 const FILTER_UNIT: maplibregl.FilterSpecification = [
   "any",
@@ -323,6 +359,27 @@ const FILTER_UNIT: maplibregl.FilterSpecification = [
 ]
 const FILTER_CRIME: maplibregl.FilterSpecification = ["==", ["get", "type"], "crime"]
 const FILTER_911: maplibregl.FilterSpecification = ["==", ["get", "type"], "911"]
+
+/** Trim path so only the segment from current vehicle position to end is shown (path "disappears behind" vehicle). */
+function trimPathFromVehicle(
+  coords: [number, number][],
+  vehicleLng: number,
+  vehicleLat: number
+): [number, number][] {
+  if (coords.length === 0) return []
+  if (coords.length === 1) return [[vehicleLng, vehicleLat], coords[0]]
+  let bestIdx = 0
+  let bestDist = Infinity
+  for (let i = 0; i < coords.length; i++) {
+    const [lng, lat] = coords[i]
+    const d = (lng - vehicleLng) ** 2 + (lat - vehicleLat) ** 2
+    if (d < bestDist) {
+      bestDist = d
+      bestIdx = i
+    }
+  }
+  return [[vehicleLng, vehicleLat], ...coords.slice(bestIdx)]
+}
 
 export interface SFMapProps {
   points: MapPoint[]
@@ -348,7 +405,6 @@ export function SFMap({
 }: SFMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
-  const popupRef = useRef<maplibregl.Popup | null>(null)
   const pointsRef = useRef<MapPoint[]>(points)
   const selectedPointIdRef = useRef<string | null>(selectedPointId)
   const pitchRef = useRef<number>(0)
@@ -356,6 +412,8 @@ export function SFMap({
   const lastFlyToRef = useRef<{ lat: number; lng: number } | null>(null)
   const onFlyToCompleteRef = useRef(onFlyToComplete)
   onFlyToCompleteRef.current = onFlyToComplete
+  const routeCoordsRef = useRef<[number, number][] | null>(null)
+  const routeCacheKeyRef = useRef<string | null>(null)
   const [pointsLayerReady, setPointsLayerReady] = useState(false)
   const [pointsVersion, setPointsVersion] = useState(0)
   if (pointsRef.current !== points) {
@@ -388,10 +446,6 @@ export function SFMap({
 
     return () => {
       setPointsLayerReady(false)
-      if (popupRef.current) {
-        popupRef.current.remove()
-        popupRef.current = null
-      }
       map.remove()
       mapRef.current = null
     }
@@ -457,9 +511,17 @@ export function SFMap({
     const addPointsLayer = () => {
       if (map.getSource(POINTS_SOURCE_ID)) return
 
-      // Units (police/fire/ambulance): smaller radii
+      // Units (police/fire/ambulance): smaller radii; idle = 25% larger (separate layers so zoom stays top-level)
       const flatRadiusUnit = MAP_POINT_RADIUS_UNIT_BY_ZOOM.flat()
       const flatRadiusUnitSelected = MAP_POINT_RADIUS_UNIT_SELECTED_BY_ZOOM.flat()
+      const flatRadiusUnitIdle = MAP_POINT_RADIUS_UNIT_BY_ZOOM.map(([z, r]) => [
+        z,
+        r * MAP_POINT_UNIT_IDLE_RADIUS_SCALE,
+      ]).flat()
+      const flatRadiusUnitSelectedIdle = MAP_POINT_RADIUS_UNIT_SELECTED_BY_ZOOM.map(([z, r]) => [
+        z,
+        r * MAP_POINT_UNIT_IDLE_RADIUS_SCALE,
+      ]).flat()
       // Crime and 911: same size (CRIME_POINT_RADIUS_BY_ZOOM)
       const flatCrimeRadius = CRIME_POINT_RADIUS_BY_ZOOM.flat()
       const flatCrimeRadiusSelected = MAP_POINT_RADIUS_SELECTED_BY_ZOOM.map(
@@ -472,6 +534,20 @@ export function SFMap({
       map.addSource(POINTS_SOURCE_ID, {
         type: "geojson",
         data: pointsToGeoJSON(withSelection),
+      })
+
+      map.addSource(VEHICLE_ROUTE_SOURCE_ID, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+      })
+      map.addLayer({
+        id: VEHICLE_ROUTE_LAYER_ID,
+        type: "line",
+        source: VEHICLE_ROUTE_SOURCE_ID,
+        paint: {
+          "line-color": MAP_ROUTE_LINE_COLOR,
+          "line-width": MAP_ROUTE_LINE_WIDTH,
+        },
       })
 
       const paintBase = {
@@ -522,8 +598,12 @@ export function SFMap({
       const selected: maplibregl.FilterSpecification = ["get", "selected"]
       const filterUnselectedCrime = ["all", unselected, FILTER_CRIME] as maplibregl.FilterSpecification
       const filterUnselectedUnit = ["all", unselected, FILTER_UNIT] as maplibregl.FilterSpecification
+      const filterUnselectedUnitEnRoute = ["all", unselected, FILTER_UNIT, ["==", ["get", "status"], true]] as maplibregl.FilterSpecification
+      const filterUnselectedUnitIdle = ["all", unselected, FILTER_UNIT, ["==", ["get", "status"], false]] as maplibregl.FilterSpecification
       const filterSelectedCrime = ["all", selected, FILTER_CRIME] as maplibregl.FilterSpecification
       const filterSelectedUnit = ["all", selected, FILTER_UNIT] as maplibregl.FilterSpecification
+      const filterSelectedUnitEnRoute = ["all", selected, FILTER_UNIT, ["==", ["get", "status"], true]] as maplibregl.FilterSpecification
+      const filterSelectedUnitIdle = ["all", selected, FILTER_UNIT, ["==", ["get", "status"], false]] as maplibregl.FilterSpecification
       const filterUnselected911 = ["all", unselected, FILTER_911] as maplibregl.FilterSpecification
       const filterSelected911 = ["all", selected, FILTER_911] as maplibregl.FilterSpecification
 
@@ -539,15 +619,26 @@ export function SFMap({
         } as CirclePaint,
       })
 
-      // Unselected police/fire/ambulance (slightly smaller)
+      // Unselected police/fire/ambulance en route (normal radius)
       map.addLayer({
         id: POINTS_LAYER_UNIT_ID,
         type: "circle",
         source: POINTS_SOURCE_ID,
-        filter: filterUnselectedUnit,
+        filter: filterUnselectedUnitEnRoute,
         paint: {
           ...paintBase,
           "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatRadiusUnit],
+        } as CirclePaint,
+      })
+      // Unselected police/fire/ambulance idle (25% larger radius)
+      map.addLayer({
+        id: POINTS_LAYER_UNIT_IDLE_ID,
+        type: "circle",
+        source: POINTS_SOURCE_ID,
+        filter: filterUnselectedUnitIdle,
+        paint: {
+          ...paintBase,
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatRadiusUnitIdle],
         } as CirclePaint,
       })
 
@@ -563,15 +654,26 @@ export function SFMap({
         } as CirclePaint,
       })
 
-      // Selected police/fire/ambulance (slightly smaller)
+      // Selected police/fire/ambulance en route (normal radius)
       map.addLayer({
         id: POINTS_LAYER_SELECTED_UNIT_ID,
         type: "circle",
         source: POINTS_SOURCE_ID,
-        filter: filterSelectedUnit,
+        filter: filterSelectedUnitEnRoute,
         paint: {
           ...paintBase,
           "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatRadiusUnitSelected],
+        } as CirclePaint,
+      })
+      // Selected police/fire/ambulance idle (25% larger radius)
+      map.addLayer({
+        id: POINTS_LAYER_SELECTED_UNIT_IDLE_ID,
+        type: "circle",
+        source: POINTS_SOURCE_ID,
+        filter: filterSelectedUnitIdle,
+        paint: {
+          ...paintBase,
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatRadiusUnitSelectedIdle],
         } as CirclePaint,
       })
 
@@ -686,8 +788,10 @@ export function SFMap({
       // Keep circles visible when flat, hidden when pitched. Recommended (closest-available) ring stays visible in 3D.
       map.setLayoutProperty(POINTS_LAYER_ID, "visibility", circleVisibility)
       map.setLayoutProperty(POINTS_LAYER_UNIT_ID, "visibility", circleVisibility)
+      map.setLayoutProperty(POINTS_LAYER_UNIT_IDLE_ID, "visibility", circleVisibility)
       map.setLayoutProperty(POINTS_LAYER_SELECTED_ID, "visibility", circleVisibility)
       map.setLayoutProperty(POINTS_LAYER_SELECTED_UNIT_ID, "visibility", circleVisibility)
+      map.setLayoutProperty(POINTS_LAYER_SELECTED_UNIT_IDLE_ID, "visibility", circleVisibility)
       map.setLayoutProperty(POINTS_LAYER_911_ID, "visibility", circleVisibility)
       map.setLayoutProperty(POINTS_LAYER_SELECTED_911_ID, "visibility", circleVisibility)
       if (map.getLayer(POINTS_LAYER_RECOMMENDED_ID)) {
@@ -737,8 +841,22 @@ export function SFMap({
               ["get", "height"],
               MAP_POINT_CRIME_BEACON_HEIGHT_M,
             ],
-            "fill-extrusion-color": MAP_POINT_CRIME_BEACON_COLOR,
-            "fill-extrusion-opacity": 0.85,
+            "fill-extrusion-color": [
+              "match",
+              ["coalesce", ["get", "priority"], 2],
+              1,
+              ["rgba", 253, 224, 71, MAP_POINT_CRIME_BEACON_OPACITY_BY_PRIORITY[1]],
+              2,
+              ["rgba", 253, 224, 71, MAP_POINT_CRIME_BEACON_OPACITY_BY_PRIORITY[2]],
+              3,
+              ["rgba", 253, 224, 71, MAP_POINT_CRIME_BEACON_OPACITY_BY_PRIORITY[3]],
+              4,
+              ["rgba", 253, 224, 71, MAP_POINT_CRIME_BEACON_OPACITY_BY_PRIORITY[4]],
+              5,
+              ["rgba", 253, 224, 71, MAP_POINT_CRIME_BEACON_OPACITY_BY_PRIORITY[5]],
+              ["rgba", 253, 224, 71, 0.65],
+            ],
+            "fill-extrusion-opacity": 1,
           },
         })
       } catch {
@@ -837,6 +955,78 @@ export function SFMap({
     if (labelsSource) labelsSource.setData(pointsToLabelsGeoJSON(points))
   }, [pointsVersion, selectedPointId])
 
+  // Vehicle route line: when selected point is an en-route unit with target, fetch A* route once and show path trimmed from current position (path disappears behind vehicle).
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !pointsLayerReady) return
+
+    const routeSource = map.getSource(VEHICLE_ROUTE_SOURCE_ID) as maplibregl.GeoJSONSource
+    if (!routeSource) return
+
+    const pts = pointsRef.current ?? []
+    const selId = selectedPointIdRef.current
+    const selected = selId ? pts.find((p) => p.id === selId) : null
+    const isUnit =
+      selected &&
+      (selected.type === "police" || selected.type === "fire" || selected.type === "ambulance")
+    const enRoute = isUnit && (selected.status === 1 || selected.status === true)
+    const hasTarget =
+      isUnit &&
+      selected &&
+      typeof selected.targetLat === "number" &&
+      typeof selected.targetLng === "number"
+
+    if (!isUnit || !enRoute || !hasTarget || !selected) {
+      routeSource.setData({ type: "FeatureCollection", features: [] })
+      routeCoordsRef.current = null
+      routeCacheKeyRef.current = null
+      return
+    }
+
+    const target = { lat: selected.targetLat!, lng: selected.targetLng! }
+    const cacheKey = `${selected.id}:${target.lat}:${target.lng}`
+
+    const setRouteData = (coords: [number, number][]) => {
+      const vehicle = pointsRef.current?.find((p) => p.id === selectedPointIdRef.current)
+      if (!vehicle || vehicle.lng == null || vehicle.lat == null) return
+      const trimmed = trimPathFromVehicle(coords, vehicle.lng, vehicle.lat)
+      if (trimmed.length < 2) return
+      routeSource.setData({
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            geometry: { type: "LineString", coordinates: trimmed },
+            properties: {},
+          },
+        ],
+      })
+    }
+
+    if (routeCoordsRef.current != null && routeCacheKeyRef.current === cacheKey) {
+      setRouteData(routeCoordsRef.current)
+      return
+    }
+
+    const vehicleIdForFetch = selected.id
+    fetchRoute(
+      { lat: selected.lat, lng: selected.lng },
+      target,
+      selected.type as "police" | "fire" | "ambulance"
+    ).then((result) => {
+      if (!result?.coords?.length) {
+        routeCoordsRef.current = null
+        routeCacheKeyRef.current = null
+        routeSource.setData({ type: "FeatureCollection", features: [] })
+        return
+      }
+      if (selectedPointIdRef.current !== vehicleIdForFetch) return
+      routeCoordsRef.current = result.coords
+      routeCacheKeyRef.current = cacheKey
+      setRouteData(result.coords)
+    })
+  }, [pointsVersion, selectedPointId, pointsLayerReady])
+
   // Refresh beacon footprint when zoom or center changes so it matches circle radius
   useEffect(() => {
     const map = mapRef.current
@@ -875,8 +1065,10 @@ export function SFMap({
       for (const id of [
         POINTS_LAYER_ID,
         POINTS_LAYER_UNIT_ID,
+        POINTS_LAYER_UNIT_IDLE_ID,
         POINTS_LAYER_SELECTED_ID,
         POINTS_LAYER_SELECTED_UNIT_ID,
+        POINTS_LAYER_SELECTED_UNIT_IDLE_ID,
         POINTS_LAYER_911_ID,
         POINTS_LAYER_SELECTED_911_ID,
       ]) {
@@ -929,138 +1121,32 @@ export function SFMap({
     }
   }, [pointsLayerReady])
 
-  const showPopup = useCallback(
-    (point: MapPoint, lngLat: [number, number]) => {
-      const map = mapRef.current
-      if (!map) return
-
-      if (popupRef.current) {
-        popupRef.current.remove()
-        popupRef.current = null
-      }
-
-      const is911 = point.type === "911"
-      const isCrime = point.type === "crime"
-      const title = is911
-        ? "911 Call"
-        : point.type === "police"
-          ? "Police Unit"
-          : point.type === "fire"
-            ? "Fire Unit"
-            : point.type === "ambulance"
-              ? "Ambulance"
-              : isCrime
-                ? "Crime"
-                : "Marker"
-
-      const fields: { label: string; value?: string }[] = is911
-        ? [
-            { label: "Location", value: point.location },
-            { label: "Description", value: point.description },
-            { label: "Caller ID", value: point.callerId },
-            { label: "Caller name", value: point.callerName },
-            { label: "Time received", value: point.timestamp },
-          ]
-        : isCrime
-          ? [
-              { label: "Category", value: point.location },
-              { label: "Address", value: point.description },
-              { label: "Details", value: point.callerId },
-            ].filter((f) => f.value && !isUnknownOrEmpty(f.value))
-          : [
-              { label: "Location", value: point.location },
-              { label: "Officer in charge", value: point.officerInCharge },
-              { label: "Unit ID", value: point.unitId },
-              {
-                label: "Status",
-                value:
-                  typeof point.status === "string"
-                    ? point.status
-                    : point.status === 1 || point.status === true
-                      ? "En route"
-                      : point.status === 0 || point.status === false
-                        ? "Idle"
-                        : "Unknown",
-              },
-            ]
-
-      const content = document.createElement("div")
-      content.className = "min-w-[200px]"
-      content.innerHTML = `
-        <div class="rounded-lg border border-border bg-card text-card-foreground shadow-sm overflow-hidden">
-          <div class="px-3 py-2 border-b border-border bg-muted/50">
-            <span class="text-sm font-semibold text-foreground">${title}</span>
-          </div>
-          <div class="p-3 space-y-1.5 text-sm">
-            ${fields
-              .filter((f) => f.value != null && f.value !== "")
-              .map(
-                (f) =>
-                  `<div><span class="text-muted-foreground">${f.label}:</span> <span class="text-foreground">${escapeHtml(f.value!)}</span></div>`
-              )
-              .join("")}
-          </div>
-        </div>
-      `
-
-      const popup = new maplibregl.Popup({
-        closeButton: true,
-        closeOnClick: false,
-        className: "sf-map-popup",
-      })
-        .setLngLat(lngLat)
-        .setDOMContent(content)
-        .addTo(map)
-
-      popup.on("close", () => {
-        onSelectPoint?.(null)
-      })
-
-      popupRef.current = popup
-    },
-    [onSelectPoint]
-  )
-
-  // Map click: query point, call onSelectPoint, show popup (only after points layer exists)
+  // Map click: query point, call onSelectPoint (only after points layer exists)
   useEffect(() => {
     const map = mapRef.current
     if (!map || !onSelectPoint || !pointsLayerReady) return
 
     const handleClick = (e: maplibregl.MapMouseEvent) => {
       if (!map.getLayer(POINTS_LAYER_ID)) return
-      const features = map.queryRenderedFeatures(e.point, {
-        layers: [
-          POINTS_LAYER_ID,
-          POINTS_LAYER_UNIT_ID,
-          POINTS_LAYER_SELECTED_ID,
-          POINTS_LAYER_SELECTED_UNIT_ID,
-          POINTS_LAYER_911_ID,
-          POINTS_LAYER_SELECTED_911_ID,
-          POINTS_ELLIPSE_LAYER_ID,
-          POINTS_ELLIPSE_LAYER_UNIT_ID,
-          POINTS_ELLIPSE_LAYER_SELECTED_ID,
-          POINTS_ELLIPSE_LAYER_SELECTED_UNIT_ID,
-          POINTS_ELLIPSE_LAYER_911_ID,
-          POINTS_ELLIPSE_LAYER_SELECTED_911_ID,
-        ],
-      })
-      if (features.length === 0) return
+      const layers = POINTS_QUERY_LAYER_IDS.filter((id) => map.getLayer(id))
+      if (layers.length === 0) return
+      const features = map.queryRenderedFeatures(e.point, { layers })
+      if (features.length === 0) {
+        onSelectPoint(null)
+        return
+      }
       const feature = features[0]
       const id = feature.properties?.id as string | undefined
       if (!id) return
 
       onSelectPoint(id)
-
-      const pts = pointsRef.current
-      const point = pts.find((p) => p.id === id)
-      if (point) showPopup(point, [point.lng, point.lat])
     }
 
     map.on("click", handleClick)
     return () => {
       map.off("click", handleClick)
     }
-  }, [pointsLayerReady, pointsVersion, onSelectPoint, showPopup])
+  }, [pointsLayerReady, pointsVersion, onSelectPoint])
 
   // Cursor on hover (only after points layer exists)
   useEffect(() => {
@@ -1069,22 +1155,9 @@ export function SFMap({
 
     const handleMouseMove = (e: maplibregl.MapMouseEvent) => {
       if (!map.getLayer(POINTS_LAYER_ID)) return
-      const features = map.queryRenderedFeatures(e.point, {
-        layers: [
-          POINTS_LAYER_ID,
-          POINTS_LAYER_UNIT_ID,
-          POINTS_LAYER_SELECTED_ID,
-          POINTS_LAYER_SELECTED_UNIT_ID,
-          POINTS_LAYER_911_ID,
-          POINTS_LAYER_SELECTED_911_ID,
-          POINTS_ELLIPSE_LAYER_ID,
-          POINTS_ELLIPSE_LAYER_UNIT_ID,
-          POINTS_ELLIPSE_LAYER_SELECTED_ID,
-          POINTS_ELLIPSE_LAYER_SELECTED_UNIT_ID,
-          POINTS_ELLIPSE_LAYER_911_ID,
-          POINTS_ELLIPSE_LAYER_SELECTED_911_ID,
-        ],
-      })
+      const layers = POINTS_QUERY_LAYER_IDS.filter((id) => map.getLayer(id))
+      if (layers.length === 0) return
+      const features = map.queryRenderedFeatures(e.point, { layers })
       map.getCanvas().style.cursor = features.length > 0 ? "pointer" : ""
     }
 
@@ -1097,8 +1170,3 @@ export function SFMap({
   return <div ref={containerRef} className={className ?? "w-full h-full"} />
 }
 
-function escapeHtml(s: string): string {
-  const div = document.createElement("div")
-  div.textContent = s
-  return div.innerHTML
-}

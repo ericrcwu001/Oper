@@ -110,6 +110,14 @@ function main() {
   const nodeCountBefore = nodes.length;
   const edgeCountBefore = edges.length;
 
+  // Pairs of nodes that are direct edge endpoints — do not merge these (would drop short road segments)
+  const directEdgePairs = new Set();
+  for (const e of edges) {
+    const mi = Math.min(e.fromNodeIdx, e.toNodeIdx);
+    const mj = Math.max(e.fromNodeIdx, e.toNodeIdx);
+    directEdgePairs.add(`${mi},${mj}`);
+  }
+
   // --- Merge pass: cluster nodes within MERGE_RADIUS_M, then remap ---
   if (nodes.length > 0) {
     // Union-Find over node indices
@@ -158,6 +166,7 @@ function main() {
         if (!list) continue;
         for (const j of list) {
           if (j < i) continue;
+          if (directEdgePairs.has(`${i},${j}`)) continue; // Do not merge edge endpoints — preserves short road segments
           if (haversineMeters(nodes[i], nodes[j]) <= MERGE_RADIUS_M) union(i, j);
         }
       }

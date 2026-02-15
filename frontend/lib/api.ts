@@ -73,6 +73,24 @@ export type CallScenarioInput =
  * Generate a new scenario from the backend (POST /api/scenarios/generate).
  */
 /**
+ * Fetch SF roads GeoJSON (GET /api/roads). For map overlay.
+ */
+export async function fetchRoads(): Promise<GeoJSON.FeatureCollection> {
+  const res = await fetch(`${API_BASE}/api/roads`)
+  if (!res.ok) throw new Error("Failed to fetch roads")
+  return res.json()
+}
+
+/**
+ * Fetch SF roads graph as GeoJSON (GET /api/roads/graph). For map overlay.
+ */
+export async function fetchRoadsGraph(): Promise<GeoJSON.FeatureCollection> {
+  const res = await fetch(`${API_BASE}/api/roads/graph`)
+  if (!res.ok) throw new Error("Failed to fetch roads graph")
+  return res.json()
+}
+
+/**
  * Fetch current simulated vehicle positions (GET /api/vehicles).
  * Returns MapPoint-compatible array; empty if simulation not running or unavailable.
  */
@@ -106,6 +124,41 @@ export async function postCrimesForSteering(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   })
+}
+
+export interface RouteResponse {
+  coords: [number, number][]
+  distanceM: number
+  etaSec: number
+}
+
+/**
+ * Fetch A* route from point to point (GET /api/route). For vehicle path display.
+ * Returns null if no route found or on error.
+ */
+export async function fetchRoute(
+  from: { lat: number; lng: number },
+  to: { lat: number; lng: number },
+  vehicleType?: string
+): Promise<RouteResponse | null> {
+  const params = new URLSearchParams({
+    fromLat: String(from.lat),
+    fromLng: String(from.lng),
+    toLat: String(to.lat),
+    toLng: String(to.lng),
+  })
+  if (vehicleType && ["police", "fire", "ambulance"].includes(vehicleType)) {
+    params.set("vehicleType", vehicleType)
+  }
+  const res = await fetch(`${API_BASE}/api/route?${params}`)
+  if (!res.ok) return null
+  const data = await res.json()
+  if (!data?.coords || !Array.isArray(data.coords)) return null
+  return {
+    coords: data.coords,
+    distanceM: data.distanceM ?? 0,
+    etaSec: data.etaSec ?? 0,
+  }
 }
 
 export async function generateScenario(

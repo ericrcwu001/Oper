@@ -10,6 +10,7 @@ import { fileURLToPath } from "url";
 import { spawnSync } from "child_process";
 import { pointAtDistanceM, haversineMeters } from "../utils/geo.js";
 import { getOfficerForUnit } from "../utils/officerNames.js";
+import { astarOnGraph, nearestNodeOnGraph } from "./roadRoutingService.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, "..", "..", "data");
@@ -132,6 +133,8 @@ function pickNextEdge(g, v) {
       }
     }
     v.status = 1;
+    v.targetLat = dispatchTarget.lat;
+    v.targetLng = dispatchTarget.lng;
     const nextEdge = edges[bestEdgeIdx];
     const fromNext = nextEdge.fromNodeIdx === atNode;
     v.currentEdge = bestEdgeIdx;
@@ -143,6 +146,8 @@ function pickNextEdge(g, v) {
 
   if (activeCrimes.length === 0) {
     v.status = 0;
+    v.targetLat = undefined;
+    v.targetLng = undefined;
     const nextEdgeIdx = incident[Math.floor(Math.random() * incident.length)];
     const nextEdge = edges[nextEdgeIdx];
     const fromNext = nextEdge.fromNodeIdx === atNode;
@@ -165,6 +170,8 @@ function pickNextEdge(g, v) {
 
   if (!nearestCrime) {
     v.status = 0;
+    v.targetLat = undefined;
+    v.targetLng = undefined;
     const nextEdgeIdx = incident[Math.floor(Math.random() * incident.length)];
     const nextEdge = edges[nextEdgeIdx];
     const fromNext = nextEdge.fromNodeIdx === atNode;
@@ -176,6 +183,51 @@ function pickNextEdge(g, v) {
   }
 
   const crimePos = [nearestCrime.lat, nearestCrime.lng];
+  const goalNodeIdx = nearestNodeOnGraph(g, crimePos);
+  if (goalNodeIdx === null) {
+    v.status = 0;
+    v.targetLat = undefined;
+    v.targetLng = undefined;
+    const nextEdgeIdx = incident[Math.floor(Math.random() * incident.length)];
+    const nextEdge = edges[nextEdgeIdx];
+    const fromNext = nextEdge.fromNodeIdx === atNode;
+    v.currentEdge = nextEdgeIdx;
+    v.targetNode = fromNext ? nextEdge.toNodeIdx : nextEdge.fromNodeIdx;
+    v.towardEnd = fromNext;
+    v.t = fromNext ? 0 : 1;
+    return;
+  }
+
+  if (goalNodeIdx === atNode) {
+    v.status = 1;
+    v.targetLat = nearestCrime.lat;
+    v.targetLng = nearestCrime.lng;
+    const nextEdgeIdx = incident[Math.floor(Math.random() * incident.length)];
+    const nextEdge = edges[nextEdgeIdx];
+    const fromNext = nextEdge.fromNodeIdx === atNode;
+    v.currentEdge = nextEdgeIdx;
+    v.targetNode = fromNext ? nextEdge.toNodeIdx : nextEdge.fromNodeIdx;
+    v.towardEnd = fromNext;
+    v.t = fromNext ? 0 : 1;
+    return;
+  }
+
+  const path = astarOnGraph(g, atNode, goalNodeIdx);
+  if (path && path.edgeIndices.length > 0) {
+    v.status = 1;
+    v.targetLat = nearestCrime.lat;
+    v.targetLng = nearestCrime.lng;
+    const bestEdgeIdx = path.edgeIndices[0];
+    const nextEdge = edges[bestEdgeIdx];
+    const fromNext = nextEdge.fromNodeIdx === atNode;
+    v.currentEdge = bestEdgeIdx;
+    v.targetNode = fromNext ? nextEdge.toNodeIdx : nextEdge.fromNodeIdx;
+    v.towardEnd = fromNext;
+    v.t = fromNext ? 0 : 1;
+    return;
+  }
+
+  // Fallback: disconnected component or no path — use greedy (closest neighbor to crime)
   let bestEdgeIdx = incident[0];
   let bestDist = Infinity;
   for (const ei of incident) {
@@ -189,7 +241,9 @@ function pickNextEdge(g, v) {
       bestEdgeIdx = ei;
     }
   }
-  v.status = 1; // en route to crime
+  v.status = 1;
+  v.targetLat = nearestCrime.lat;
+  v.targetLng = nearestCrime.lng;
   const nextEdge = edges[bestEdgeIdx];
   const fromNext = nextEdge.fromNodeIdx === atNode;
   v.currentEdge = bestEdgeIdx;
@@ -256,7 +310,7 @@ function positionOf(g, v) {
 }
 
 function toMapPoint(v, [lat, lng]) {
-  return {
+  const point = {
     id: v.id,
     type: v.type,
     lat,
@@ -265,6 +319,11 @@ function toMapPoint(v, [lat, lng]) {
     officerInCharge: v.officerInCharge,
     status: v.status,
   };
+  if (v.status === 1 && v.targetLat != null && v.targetLng != null) {
+    point.targetLat = v.targetLat;
+    point.targetLng = v.targetLng;
+  }
+  return point;
 }
 
 const TICKS_PER_WRITE = Math.round(WRITE_INTERVAL_MS / 1000 / DT_SECONDS);
@@ -321,7 +380,11 @@ export function getPositions() {
 export function setActiveCrimes(crimes) {
   const next = Array.isArray(crimes) ? crimes : [];
   if (next.length === 0 && vehicles.length > 0) {
-    for (const v of vehicles) v.status = 0;
+    for (const v of vehicles) {
+      v.status = 0;
+      v.targetLat = undefined;
+      v.targetLng = undefined;
+    }
   }
   activeCrimes = next;
 }

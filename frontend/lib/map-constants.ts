@@ -72,6 +72,9 @@ export const MAP_POINT_RADIUS_UNIT_SELECTED_BY_ZOOM: [number, number][] = [
   [16, 7],
 ]
 
+/** Scale factor for unit circle radius when idle (available). En route = 1, idle = this value (25% larger). */
+export const MAP_POINT_UNIT_IDLE_RADIUS_SCALE = 1.25
+
 /** 911 call marker when selected (slightly larger than base 911 radius). */
 export const MAP_POINT_911_RADIUS_SELECTED_BY_ZOOM: [number, number][] = [
   [11, 9],
@@ -81,6 +84,9 @@ export const MAP_POINT_911_RADIUS_SELECTED_BY_ZOOM: [number, number][] = [
 
 /** Extra radius when point is selected (px). */
 export const MAP_POINT_SELECTED_RADIUS_OFFSET = 2.5
+
+/** Base height for beacon extrusions (meters). Slightly above 0 to avoid z-fighting at the bottom. */
+export const MAP_POINT_BEACON_BASE_M = 2
 
 /** 911 beacon extrusion height in meters (visible when map is tilted in 3D). */
 export const MAP_POINT_911_BEACON_HEIGHT_M = 750
@@ -106,8 +112,20 @@ export const MAP_POINT_CRIME_BEACON_HEIGHT_BY_PRIORITY: Record<number, number> =
 /** Crime beacon color (yellow to match crime points, transparent but bright). */
 export const MAP_POINT_CRIME_BEACON_COLOR = "#FDE04780"
 
+/** Crime beacon opacity by priority (1–5). Higher priority = more solid. */
+export const MAP_POINT_CRIME_BEACON_OPACITY_BY_PRIORITY: Record<number, number> = {
+  1: 0.25,
+  2: 0.4,
+  3: 0.65,
+  4: 0.8,
+  5: 0.95,
+}
+
 /** Crime beacon footprint half-side in degrees (smaller than 911). */
 export const MAP_POINT_CRIME_BEACON_FOOTPRINT = 0.00012
+
+/** Min separation (deg) between crime beacon centers so they don't overlap. Skip loading a crime if within this of another. */
+export const CRIME_BEACON_MIN_SEPARATION_DEG = 0.013
 
 /** Stroke for "recommended" (closest available) unit highlight ring on the map. Bright pink for contrast with blue/orange/green dots. */
 export const MAP_POINT_RECOMMENDED_STROKE_COLOR = "#E879F9"
@@ -132,6 +150,10 @@ export const MAP_LABEL_ZOOM_CRIME_BY_PRIORITY: Record<number, number> = {
 }
 /** Units require more zoom to reduce clutter. */
 export const MAP_LABEL_ZOOM_UNITS = 15
+
+/** Vehicle route line (A* path to crime when vehicle is selected and en route). Semi-transparent blue. */
+export const MAP_ROUTE_LINE_COLOR = "#3B82F880"
+export const MAP_ROUTE_LINE_WIDTH = 3
 
 /**
  * PMTiles URL for vector basemap. Prefer local copy at /tiles/sf.pmtiles (see frontend/public/tiles/).
