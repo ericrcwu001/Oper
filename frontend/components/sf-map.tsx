@@ -18,14 +18,16 @@ import {
   MAP_POINT_911_BEACON_HEIGHT_M,
   MAP_POINT_911_BEACON_COLOR,
   MAP_POINT_CRIME_BEACON_HEIGHT_M,
+  MAP_POINT_CRIME_BEACON_HEIGHT_BY_PRIORITY,
   MAP_POINT_CRIME_BEACON_COLOR,
   MAP_POINT_CRIME_BEACON_FOOTPRINT,
+  MAP_LABEL_ZOOM_CRIME_BY_PRIORITY,
+  MAP_LABEL_ZOOM_CRIME,
   MAP_POINT_911_STROKE_COLOR,
   CRIME_POINT_STROKE_COLOR,
   MAP_POINT_RECOMMENDED_STROKE_COLOR,
   MAP_POINT_RECOMMENDED_RING_RADIUS_BY_ZOOM,
   MAP_LABEL_ZOOM_911,
-  MAP_LABEL_ZOOM_CRIME,
   MAP_LABEL_ZOOM_UNITS,
 } from "@/lib/map-constants"
 import { getSFMapStyle } from "@/lib/map-style"
@@ -53,6 +55,7 @@ function pointsToGeoJSON(points: MapPoint[]): GeoJSON.FeatureCollection {
         radiusScale: p.radiusScale ?? 1,
         recommended: p.recommended ?? false,
         status: p.status === 1 || p.status === true,
+        ...(p.type === "crime" && p.priority != null && { priority: p.priority }),
       },
     })),
   }
@@ -83,6 +86,7 @@ function getPointLabelText(point: MapPoint): string {
           { label: "Category", value: point.location },
           { label: "Address", value: point.description },
           { label: "Details", value: point.callerId },
+          { label: "Priority", value: point.priority != null ? String(point.priority) : undefined },
         ]
       : [
           { label: "Location", value: point.location },
@@ -100,11 +104,14 @@ function getPointLabelText(point: MapPoint): string {
                     : "Unknown",
           },
         ]
-  // Crime: prefer displayLabel (point.label) when present; add Address if useful
+  // Crime: prefer displayLabel (point.label) when present; add Address and priority
   if (isCrime && point.label && !isUnknownOrEmpty(point.label)) {
     const parts = [point.label]
     if (point.description && !isUnknownOrEmpty(point.description)) {
       parts.push(point.description)
+    }
+    if (point.priority != null) {
+      parts.push(`Priority ${point.priority}`)
     }
     const lines = parts.map((v) => `[${v}]`).join("\n")
     return `${coords}\n${lines}`
@@ -120,7 +127,7 @@ function getPointLabelText(point: MapPoint): string {
   return fieldLines ? `[${coords}]\n${fieldLines}` : `[${coords}]`
 }
 
-/** GeoJSON for label symbol layers: Point features with id, type, and text. */
+/** GeoJSON for label symbol layers: Point features with id, type, text, and labelMinZoom for crime (by priority). */
 function pointsToLabelsGeoJSON(points: MapPoint[]): GeoJSON.FeatureCollection {
   return {
     type: "FeatureCollection",
@@ -132,6 +139,10 @@ function pointsToLabelsGeoJSON(points: MapPoint[]): GeoJSON.FeatureCollection {
         id: p.id,
         type: p.type,
         text: getPointLabelText(p),
+        ...(p.type === "crime" && {
+          labelMinZoom:
+            MAP_LABEL_ZOOM_CRIME_BY_PRIORITY[p.priority ?? 2] ?? MAP_LABEL_ZOOM_CRIME,
+        }),
       },
     })),
   }
@@ -255,17 +266,20 @@ function points911ToBeaconGeoJSON(points: MapPoint[], zoom: number, radiusPx: nu
   return { type: "FeatureCollection", features }
 }
 
-/** Cylindrical beacon polygon around crime points. Radius in degrees computed per-point so circumference matches circle. */
+/** Cylindrical beacon polygon around crime points. Height per-point from priority (1–5). */
 function pointsCrimeToBeaconGeoJSON(points: MapPoint[], zoom: number, radiusPx: number): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature<GeoJSON.Polygon>[] = points
     .filter((p) => p.type === "crime")
     .map((p) => {
       const radiusDeg = beaconRadiusDegrees(zoom, p.lat, radiusPx)
+      const priority = p.priority ?? 2
+      const height =
+        MAP_POINT_CRIME_BEACON_HEIGHT_BY_PRIORITY[priority] ?? MAP_POINT_CRIME_BEACON_HEIGHT_M
       return {
         type: "Feature",
         id: p.id,
         geometry: { type: "Polygon", coordinates: [circleToRing(p.lng, p.lat, radiusDeg)] },
-        properties: { id: p.id },
+        properties: { id: p.id, height },
       }
     })
   return { type: "FeatureCollection", features }
@@ -706,7 +720,7 @@ export function SFMap({
         // fill-extrusion may be unsupported in some environments; circles still work
       }
 
-      // Crime vertical beacons (cylindrical pillars, height 500m); skip if unsupported
+      // Crime vertical beacons (height per-point by priority); skip if unsupported
       try {
         map.addSource(POINTS_CRIME_BEACONS_SOURCE_ID, {
           type: "geojson",
@@ -718,7 +732,11 @@ export function SFMap({
           source: POINTS_CRIME_BEACONS_SOURCE_ID,
           paint: {
             "fill-extrusion-base": 0,
-            "fill-extrusion-height": MAP_POINT_CRIME_BEACON_HEIGHT_M,
+            "fill-extrusion-height": [
+              "coalesce",
+              ["get", "height"],
+              MAP_POINT_CRIME_BEACON_HEIGHT_M,
+            ],
             "fill-extrusion-color": MAP_POINT_CRIME_BEACON_COLOR,
             "fill-extrusion-opacity": 0.85,
           },
@@ -757,11 +775,16 @@ export function SFMap({
         filter: FILTER_911,
         minzoom: MAP_LABEL_ZOOM_911,
       } as maplibregl.SymbolLayerSpecification)
+      // Crime labels: visible when zoom >= labelMinZoom (higher priority = visible when more zoomed out)
       map.addLayer({
         ...labelLayerBase,
         id: POINTS_LABELS_LAYER_CRIME_ID,
-        filter: FILTER_CRIME,
-        minzoom: MAP_LABEL_ZOOM_CRIME,
+        filter: [
+          "all",
+          FILTER_CRIME,
+          [">=", ["zoom"], ["coalesce", ["get", "labelMinZoom"], 15]],
+        ] as maplibregl.FilterSpecification,
+        minzoom: 10,
       } as maplibregl.SymbolLayerSpecification)
       map.addLayer({
         ...labelLayerBase,

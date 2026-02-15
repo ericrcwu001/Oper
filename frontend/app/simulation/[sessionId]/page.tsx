@@ -556,6 +556,7 @@ export default function LiveSimulationPage({
         callerId: c.description,
         label: c.displayLabel,
         radiusScale: crimePopScales[c.id] ?? 1,
+        priority: c.priority ?? 2,
       }))
   }, [crimesFromApi, crimeSimSeconds, crimeResolvedIds, crimePopScales])
   crimePointsRef.current = crimeMapPoints

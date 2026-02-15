@@ -374,6 +374,8 @@ export interface CrimeRecord {
   description?: string
   displayLabel?: string
   isUnknown?: boolean
+  /** Priority 1–5 for beacon height and label visibility (higher = taller beacon, label visible when more zoomed out). */
+  priority?: number
 }
 
 /**

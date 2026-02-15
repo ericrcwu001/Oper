@@ -55,7 +55,7 @@ router.post('/assess', async (req, res) => {
         : DEFAULT_INCIDENT;
 
     const vehicles = getPositions();
-    const { summaryForLLM, byType } = rankByProximityAndETA(incidentLatLng, vehicles);
+    const { byType } = rankByProximityAndETA(incidentLatLng, vehicles);
     const closestVehicleIds = [
       ...(byType.ambulance || []),
       ...(byType.police || []),
@@ -67,7 +67,8 @@ router.post('/assess', async (req, res) => {
       fire: byType.fire?.[0]?.id ?? null,
     };
 
-    const result = await assessTranscriptWithLLM(transcript, { resourceSummary: summaryForLLM });
+    // Do NOT pass resourceSummary (derived from incidentLocation)—recommendations must be transcript-only
+    const result = await assessTranscriptWithLLM(transcript, {});
     res.json({ ...result, closestVehicleIds, closestVehicleByType });
   } catch (e) {
     const message = e.message || 'Assessment failed';
