@@ -39,4 +39,6 @@ export interface MapPoint {
   unitId?: string
   /** true = en route, false = idle/roaming */
   status?: boolean
+  /** Optional scale for circle radius (e.g. 1.5 for pop-in effect). */
+  radiusScale?: number
 }

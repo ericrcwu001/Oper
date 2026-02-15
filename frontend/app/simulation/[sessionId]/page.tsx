@@ -36,6 +36,7 @@ import {
   assessCallTranscript,
   fetchCrimesDay,
   fetchVehicles,
+  postCrimesForSteering,
   type GeneratedScenarioPayload,
   type CallScenarioInput,
   type CrimeRecord,
@@ -51,7 +52,13 @@ import type {
 import type { MapPoint } from "@/lib/map-types"
 import { SFMap } from "@/components/sf-map"
 import { cn } from "@/lib/utils"
-import { CRIME_SIM_CLOCK_SPEEDUP } from "@/lib/simulation-constants"
+import {
+  SIM_SECONDS_PER_TICK,
+  CRIME_RESOLVE_RADIUS_DEG,
+  MIN_VEHICLES_AT_SCENE,
+  SIM_SECONDS_AT_SCENE_TO_RESOLVE,
+  CRIME_SIM_CLOCK_SPEEDUP,
+} from "@/lib/simulation-constants"
 
 /** Initial map points with hardcoded popup data (no backend). */
 function getInitialMapPoints(): MapPoint[] {
@@ -88,6 +95,22 @@ function getInitialMapPoints(): MapPoint[] {
       status: false,
     },
   ]
+}
+
+/** Count emergency vehicles (police/fire/ambulance) within radiusDeg of (lat, lng). */
+function countVehiclesNear(
+  vehicles: MapPoint[],
+  lat: number,
+  lng: number,
+  radiusDeg: number
+): number {
+  const r2 = radiusDeg * radiusDeg
+  return vehicles.filter((p) => {
+    if (p.type !== "police" && p.type !== "fire" && p.type !== "ambulance") return false
+    const dlat = p.lat - lat
+    const dlng = p.lng - lng
+    return dlat * dlat + dlng * dlng <= r2
+  }).length
 }
 
 const GENERATED_SCENARIO_STORAGE_KEY = "simulation-generated-scenario"
@@ -230,14 +253,20 @@ export default function LiveSimulationPage({
   const [apiLoading, setApiLoading] = useState(false)
   const [apiError, setApiError] = useState<string | null>(null)
   const [notes, setNotes] = useState<NoteEntry[]>([])
-  const [mapPoints, setMapPoints] = useState<MapPoint[]>(getInitialMapPoints)
+  const [mapPoints, setMapPoints] = useState<MapPoint[]>(() => getInitialMapPoints())
   const [selectedPointId, setSelectedPointId] = useState<string | null>(null)
-  // SF crimes feed (configurable sim time speedup, white dots, random resolve duration)
+  // SF crimes feed: visible until enough vehicles at scene for long enough
   const [crimesFromApi, setCrimesFromApi] = useState<CrimeRecord[]>([])
   const [crimesDate, setCrimesDate] = useState<string | null>(null)
   const [crimeSimSeconds, setCrimeSimSeconds] = useState(0)
-  const [crimeResolveAt, setCrimeResolveAt] = useState<Record<string, number>>({})
+  const [crimeResolvedIds, setCrimeResolvedIds] = useState<Set<string>>(new Set())
+  const [crimeProximitySeconds, setCrimeProximitySeconds] = useState<Record<string, number>>({})
   const crimePointsRef = useRef<MapPoint[]>([])
+  const mapPointsRef = useRef<MapPoint[]>([])
+  const crimeResolvedIdsRef = useRef<Set<string>>(new Set())
+  const crimeProximitySecondsRef = useRef<Record<string, number>>({})
+  const [crimePopScales, setCrimePopScales] = useState<Record<string, number>>({})
+  const previousCrimeIdsRef = useRef<Set<string>>(new Set())
   const [dispatchRecommendation, setDispatchRecommendation] = useState<{
     units: { unit: string; rationale?: string; severity?: string }[]
     severity: string
@@ -255,6 +284,9 @@ export default function LiveSimulationPage({
   const crimesFromApiRef = useRef<CrimeRecord[]>([])
   crimeSimSecondsRef.current = crimeSimSeconds
   crimesFromApiRef.current = crimesFromApi
+  mapPointsRef.current = mapPoints
+  crimeResolvedIdsRef.current = crimeResolvedIds
+  crimeProximitySecondsRef.current = crimeProximitySeconds
 
   // Simulated loading
   useEffect(() => {
@@ -274,54 +306,65 @@ export default function LiveSimulationPage({
       })
   }, [])
 
-  // Sim clock: every real second = CRIME_SIM_CLOCK_SPEEDUP sim seconds; assign random resolve duration when crime appears
+  // Visible crimes: sim time passed and not yet resolved (resolved when enough vehicles at scene for long enough)
+  const crimeMapPoints = useMemo(() => {
+    return crimesFromApi
+      .filter(
+        (c) =>
+          c.simSecondsFromMidnight <= crimeSimSeconds && !crimeResolvedIds.has(c.id)
+      )
+      .map((c) => ({
+        id: c.id,
+        type: "crime" as const,
+        lat: c.lat,
+        lng: c.lng,
+        location: c.category,
+        description: c.address,
+        callerId: c.description,
+        radiusScale: crimePopScales[c.id] ?? 1,
+      }))
+  }, [crimesFromApi, crimeSimSeconds, crimeResolvedIds, crimePopScales])
+  crimePointsRef.current = crimeMapPoints
+
+  // When new crimes appear, set pop scale for pop-in effect
   useEffect(() => {
-    const interval = setInterval(() => {
-      const nextSim = crimeSimSecondsRef.current + CRIME_SIM_CLOCK_SPEEDUP
-      crimeSimSecondsRef.current = nextSim
-      setCrimeSimSeconds(nextSim)
-      const now = Date.now()
-      const crimes = crimesFromApiRef.current
-      setCrimeResolveAt((prev) => {
+    const currentIds = new Set(crimeMapPoints.map((p) => p.id))
+    const prev = previousCrimeIdsRef.current
+    const added = [...currentIds].filter((id) => !prev.has(id))
+    if (added.length > 0) {
+      setCrimePopScales((s) => {
+        const next = { ...s }
+        for (const id of added) next[id] = 1.55
+        return next
+      })
+    }
+    previousCrimeIdsRef.current = currentIds
+  }, [crimeMapPoints])
+
+  // Decay pop scale toward 1 so pop-in effect fades
+  useEffect(() => {
+    const id = setInterval(() => {
+      setCrimePopScales((prev) => {
+        if (Object.keys(prev).length === 0) return prev
         const next = { ...prev }
-        for (const c of crimes) {
-          if (c.simSecondsFromMidnight <= nextSim && !(c.id in next)) {
-            next[c.id] = now + 8000 + Math.random() * 17000
-          }
-        }
-        for (const id of Object.keys(next)) {
-          if (now >= next[id]) delete next[id]
+        for (const crimeId of Object.keys(next)) {
+          const v = next[crimeId] * 0.92 + 0.08
+          if (v <= 1.02) delete next[crimeId]
+          else next[crimeId] = v
         }
         return next
       })
-    }, 1000)
-    return () => clearInterval(interval)
+    }, 50)
+    return () => clearInterval(id)
   }, [])
 
-  // Visible crimes as map points (white dots): sim time passed + not yet resolved (random duration)
-  const crimeMapPoints = useMemo(() => {
-    const now = Date.now()
-    return crimesFromApi.filter(
-      (c) =>
-        c.simSecondsFromMidnight <= crimeSimSeconds &&
-        (!(c.id in crimeResolveAt) || now < crimeResolveAt[c.id])
-    ).map((c) => ({
-      id: c.id,
-      type: "crime" as const,
-      lat: c.lat,
-      lng: c.lng,
-      location: c.category,
-      description: c.address,
-      callerId: c.description,
-    }))
-  }, [crimesFromApi, crimeSimSeconds, crimeResolveAt])
-  crimePointsRef.current = crimeMapPoints
-
-  // Poll backend vehicles every 1s; if we get data, show 911 + vehicles + crimes. Else keep current points (static demo).
+  // Poll backend vehicles every 1s; send active crimes so backend steers vehicles toward them (real movement).
   useEffect(() => {
     const POLL_MS = 1000
     const poll = async () => {
       try {
+        const crimesForBackend = crimePointsRef.current.map((p) => ({ lat: p.lat, lng: p.lng }))
+        await postCrimesForSteering(crimesForBackend).catch(() => {})
         const vehicles = await fetchVehicles()
         if (vehicles.length > 0) {
           const initial = getInitialMapPoints()
@@ -339,29 +382,80 @@ export default function LiveSimulationPage({
     return () => clearInterval(id)
   }, [])
 
-  // 30fps tick: animate police (when no backend vehicles) and always merge current crime dots so both vehicles and crimes show
+  // Single time tick: advance crime sim clock, resolve crimes when enough vehicles at scene long enough, then update map
   useEffect(() => {
     const TICK_MS = 1000 / 30
     tick30Ref.current = setInterval(() => {
+      const nextSim = crimeSimSecondsRef.current + SIM_SECONDS_PER_TICK
+      crimeSimSecondsRef.current = nextSim
+      setCrimeSimSeconds(nextSim)
+
+      const vehicles = mapPointsRef.current.filter(
+        (p) => p.type === "police" || p.type === "fire" || p.type === "ambulance"
+      )
+      const visibleCrimes = crimesFromApiRef.current.filter(
+        (c) =>
+          c.simSecondsFromMidnight <= nextSim && !crimeResolvedIdsRef.current.has(c.id)
+      )
+      const newProximity: Record<string, number> = {}
+      const newlyResolved: string[] = []
+      for (const c of visibleCrimes) {
+        const count = countVehiclesNear(vehicles, c.lat, c.lng, CRIME_RESOLVE_RADIUS_DEG)
+        if (count >= MIN_VEHICLES_AT_SCENE) {
+          const prevSec = crimeProximitySecondsRef.current[c.id] ?? 0
+          const nextSec = prevSec + SIM_SECONDS_PER_TICK
+          newProximity[c.id] = nextSec
+          if (nextSec >= SIM_SECONDS_AT_SCENE_TO_RESOLVE) newlyResolved.push(c.id)
+        }
+      }
+
+      if (Object.keys(newProximity).length > 0 || newlyResolved.length > 0) {
+        setCrimeProximitySeconds((prev) => {
+          const next = { ...prev, ...newProximity }
+          for (const id of newlyResolved) delete next[id]
+          return next
+        })
+        crimeProximitySecondsRef.current = {
+          ...crimeProximitySecondsRef.current,
+          ...newProximity,
+        }
+        for (const id of newlyResolved) delete crimeProximitySecondsRef.current[id]
+        if (newlyResolved.length > 0) {
+          setCrimeResolvedIds((prev) => {
+            const next = new Set(prev)
+            for (const id of newlyResolved) next.add(id)
+            return next
+          })
+          crimeResolvedIdsRef.current = new Set([
+            ...crimeResolvedIdsRef.current,
+            ...newlyResolved,
+          ])
+        }
+      }
+
       setMapPoints((prev) => {
         const crimes = crimePointsRef.current
+        let next: MapPoint[]
         if (prev.length > 10) {
-          // Backend vehicles active: keep vehicles/911, replace crime layer with current crimes
-          return [...prev.filter((p) => p.type !== "crime"), ...crimes]
+          const nonCrime = prev.filter((p) => p.type !== "crime")
+          next = [...nonCrime, ...crimes]
+        } else {
+          const base = getInitialMapPoints()
+          const police = base.find((p) => p.id === "unit-p1")
+          if (!police || police.type !== "police") {
+            next = [...base, ...crimes]
+          } else {
+            angleRef.current += (2 * Math.PI * 0.2) / 30
+            const r = 0.003
+            const lat = 37.78 + r * Math.sin(angleRef.current)
+            const lng = -122.41 + r * Math.cos(angleRef.current)
+            const animatedBase = base.map((p) =>
+              p.id === "unit-p1" ? { ...p, lat, lng } : p
+            )
+            next = [...animatedBase, ...crimes]
+          }
         }
-        const base = getInitialMapPoints()
-        const police = base.find((p) => p.id === "unit-p1")
-        if (!police || police.type !== "police") {
-          return [...base, ...crimes]
-        }
-        angleRef.current += (2 * Math.PI * 0.2) / 30
-        const r = 0.003
-        const lat = 37.78 + r * Math.sin(angleRef.current)
-        const lng = -122.41 + r * Math.cos(angleRef.current)
-        const animatedBase = base.map((p) =>
-          p.id === "unit-p1" ? { ...p, lat, lng } : p
-        )
-        return [...animatedBase, ...crimes]
+        return next.length > 0 ? next : prev
       })
     }, TICK_MS)
     return () => {
@@ -769,50 +863,53 @@ export default function LiveSimulationPage({
           </div>
         )}
 
-        {/* Map - full-width top row (from map/vehicle feature) */}
-        <Card className="mb-4 overflow-hidden border bg-card shrink-0">
-          <div className="relative h-[420px] min-h-[280px] w-full">
-            <SFMap
-              points={mapPoints}
-              selectedPointId={selectedPointId}
-              onSelectPoint={setSelectedPointId}
-              className="absolute inset-0 h-full w-full"
-            />
-            <div className="absolute bottom-3 left-3 z-10 flex flex-wrap gap-4 rounded-md border border-border/80 bg-card/95 px-3 py-2 text-xs shadow-sm backdrop-blur">
-              <span className="flex items-center gap-1.5">
-                <span className="h-2.5 w-2.5 rounded-full bg-[#EF4444]" aria-hidden />
-                911
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="h-2.5 w-2.5 rounded-full bg-[#3B82F6]" aria-hidden />
-                Police
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="h-2.5 w-2.5 rounded-full bg-[#F97316]" aria-hidden />
-                Fire
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="h-2.5 w-2.5 rounded-full bg-[#22C55E]" aria-hidden />
-                Ambulance
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="h-2.5 w-2.5 rounded-full border border-border bg-[#FFFFFF]" aria-hidden />
-                Crime
-              </span>
-              {crimesDate && (
-                <span className="text-muted-foreground">Day: {crimesDate} ({CRIME_SIM_CLOCK_SPEEDUP}×)</span>
-              )}
-            </div>
+        {/* Main: Left = Map (50%), Right = Transcript top, Controls | Dispatch bottom */}
+        <div className="flex min-h-0 flex-1 flex-col gap-3 py-3 lg:flex-row">
+          {/* Left half — Map */}
+          <div className="flex min-h-[280px] min-w-0 flex-1 flex-col lg:min-h-0 lg:max-w-[50%]">
+            <Card className="flex min-h-0 flex-1 flex-col overflow-hidden border bg-card">
+              <div className="relative min-h-0 flex-1 w-full">
+                <SFMap
+                  points={mapPoints}
+                  selectedPointId={selectedPointId}
+                  onSelectPoint={setSelectedPointId}
+                  className="absolute inset-0 h-full w-full"
+                />
+                <div className="absolute bottom-3 left-3 z-10 flex flex-wrap gap-4 rounded-md border border-border/80 bg-card/95 px-3 py-2 text-xs shadow-sm backdrop-blur">
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#EF4444]" aria-hidden />
+                    911
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#3B82F6]" aria-hidden />
+                    Police
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#F97316]" aria-hidden />
+                    Fire
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#22C55E]" aria-hidden />
+                    Ambulance
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2.5 w-2.5 rounded-full border border-border bg-[#FFFFFF]" aria-hidden />
+                    Crime
+                  </span>
+                  {crimesDate && (
+                    <span className="text-muted-foreground">Day: {crimesDate} ({CRIME_SIM_CLOCK_SPEEDUP}×)</span>
+                  )}
+                </div>
+              </div>
+            </Card>
           </div>
-        </Card>
 
-        {/* Main: Left = transcript (main), Right = controls + notes + dispatch */}
-        <div className="flex min-h-0 flex-1 flex-col gap-4 py-4 lg:flex-row">
-          {/* Left — Live transcription (main) */}
-          <div className="flex min-h-[240px] min-w-0 flex-1 flex-col lg:min-h-0">
-            <Card className="flex min-h-0 flex-1 flex-col border bg-card overflow-hidden">
-              <CardHeader className="shrink-0 border-b py-3">
-                <CardTitle className="text-base font-medium">Live transcription</CardTitle>
+          {/* Right half — 4 components: transcript (top), then bottom split = controls + dispatch | notes */}
+          <div className="flex min-h-[320px] min-w-0 flex-1 flex-col gap-3 lg:min-h-0">
+            {/* Top half: Live transcription (greatest priority, full width) */}
+            <Card className="flex min-h-0 flex-1 flex-col overflow-hidden border bg-card min-w-0">
+              <CardHeader className="shrink-0 border-b py-2.5">
+                <CardTitle className="text-sm font-medium">Live transcription</CardTitle>
                 <p className="text-xs text-muted-foreground">
                   Caller and operator — scroll to see full conversation
                 </p>
@@ -821,66 +918,29 @@ export default function LiveSimulationPage({
                 <TranscriptFeed turns={transcript} partialText={partialText} />
               </div>
             </Card>
-          </div>
 
-          {/* Right — Compact controls, operator notes, dispatch */}
-          <div className="flex min-h-0 w-full shrink-0 flex-col gap-3 overflow-y-auto lg:min-h-0 lg:w-[360px]">
-            {/* Controls: compact row(s) */}
-            <Card className="shrink-0 border bg-card">
-              <CardContent className="space-y-3 py-3">
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Audio</span>
-                    <AudioControl audioUrl={callerAudioUrl} disabled={!callActive} />
-                  </div>
-                  <MicControl
-                    disabled={!callActive}
-                    onRecordingComplete={handleVoiceRecordingComplete}
-                    sending={apiLoading}
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Type message..."
-                    value={textInput}
-                    onChange={(e) => setTextInput(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") handleSendText() }}
-                    disabled={!callActive}
-                    className="h-8 text-sm"
-                  />
-                  <Button
-                    size="icon"
-                    className="h-8 w-8 shrink-0"
-                    onClick={handleSendText}
-                    disabled={!callActive || !textInput.trim() || apiLoading}
-                    aria-label="Send"
-                  >
-                    {apiLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8 shrink-0 gap-1 px-2"
-                    onClick={handleRequestClarification}
-                    disabled={!callActive || apiLoading}
-                    title="Request clarification"
-                  >
-                    <HelpCircle className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Operator notes — main space for dispatcher */}
-            <Card className="flex min-h-0 flex-1 flex-col border bg-card overflow-hidden">
-              <NotesPanel
-                callSeconds={callSeconds}
-                notes={notes}
-                onAddNote={(entry) => setNotes((prev) => [...prev, entry])}
-              />
-            </Card>
-
-            {/* Dispatch (live evaluation) — LLM + RAG; show previous recommendations while analyzing with clear top strip */}
+            {/* Bottom half: split — (Controls + Dispatch) | Notes */}
+            <div className="flex shrink-0 flex-col gap-2 lg:flex-row lg:min-h-0">
+              {/* Left: User controls (mic + level) then Dispatch */}
+              <div className="flex min-w-0 flex-1 flex-col gap-2 overflow-y-auto lg:min-h-0 lg:max-w-[55%]">
+                <Card className="shrink-0 border bg-card">
+                  <CardContent className="flex flex-col gap-2 py-2 px-3 sm:flex-row sm:items-center sm:gap-4 sm:flex-wrap">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground shrink-0 w-14">Caller</span>
+                      <AudioControl audioUrl={callerAudioUrl} disabled={!callActive} compact />
+                    </div>
+                    <div className="flex items-center gap-2 min-w-0 border-t pt-2 sm:border-t-0 sm:pt-0 sm:border-l sm:pl-4">
+                      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground shrink-0 w-10">Mic</span>
+                      <MicControl
+                        disabled={!callActive}
+                        onRecordingComplete={handleVoiceRecordingComplete}
+                        sending={apiLoading}
+                        compact
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+                {/* Dispatch recommendations underneath controls */}
             <Card
               className={cn(
                 "shrink-0 border bg-card transition-all relative overflow-hidden",
@@ -1009,6 +1069,17 @@ export default function LiveSimulationPage({
                 )}
               </CardContent>
             </Card>
+              </div>
+
+              {/* Right: Operator notes */}
+              <Card className="flex min-h-[200px] min-w-0 flex-1 flex-col border bg-card overflow-hidden lg:min-h-0">
+                <NotesPanel
+                  callSeconds={callSeconds}
+                  notes={notes}
+                  onAddNote={(entry) => setNotes((prev) => [...prev, entry])}
+                />
+              </Card>
+            </div>
           </div>
         </div>
       </div>

@@ -1,13 +1,14 @@
 /**
  * In-process vehicle simulation. Runs when the server starts.
  * GET /api/vehicles returns current positions from memory.
+ * Vehicles within ATTRACTION_RADIUS_M of a crime steer toward it (real movement along roads).
  */
 
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { spawnSync } from "child_process";
-import { pointAtDistanceM } from "../utils/geo.js";
+import { pointAtDistanceM, haversineMeters } from "../utils/geo.js";
 import { getOfficerForUnit } from "../utils/officerNames.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -15,7 +16,7 @@ const DATA_DIR = path.join(__dirname, "..", "..", "data");
 const ROADS_PATH = path.join(DATA_DIR, "sf-roads.json");
 const GRAPH_PATH = path.join(DATA_DIR, "sf-roads-graph.json");
 
-const COUNTS = { fire: 40, police: 300, ambulance: 20 };
+const COUNTS = { fire: 25, police: 180, ambulance: 12 };
 const SPEED_BASE = { fire: 13, police: 11, ambulance: 13 };
 const SPEED_VARIANCE = 0.15;
 const DT_SECONDS = 0.1;
@@ -24,11 +25,15 @@ const PAUSE_AT_NODE_PROBABILITY = 0.4;
 const PAUSE_MIN_SECONDS = 0.5;
 const PAUSE_MAX_SECONDS = 2.5;
 const MIN_NODE_DEGREE_FOR_PAUSE = 2; // nodes with 2+ incident edges (intersections / segment joins)
+/** When a vehicle is within this distance (m) of a crime, it steers toward the nearest crime at the next node. Larger = more visible flow toward crime areas. */
+const ATTRACTION_RADIUS_M = 1500;
 
 let graph = null;
 let vehicles = [];
 let positions = [];
 let intervalId = null;
+/** Active crime locations { lat, lng }[] from frontend (POST /api/simulation/crimes). */
+let activeCrimes = [];
 
 function loadGraph() {
   if (fs.existsSync(GRAPH_PATH)) {
@@ -81,7 +86,7 @@ function spawnVehicles(g) {
 }
 
 function pickNextEdge(g, v) {
-  const { edges, adjacency } = g;
+  const { nodes, edges, adjacency } = g;
   const edge = edges[v.currentEdge];
   const atNode = v.towardEnd ? edge.toNodeIdx : edge.fromNodeIdx;
   const incident = adjacency[atNode].filter((ei) => ei !== v.currentEdge);
@@ -90,10 +95,57 @@ function pickNextEdge(g, v) {
     v.t = v.towardEnd ? 0 : 1;
     return;
   }
-  const nextEdgeIdx = incident[Math.floor(Math.random() * incident.length)];
-  const nextEdge = edges[nextEdgeIdx];
+
+  const atPos = nodes[atNode];
+  if (!atPos || activeCrimes.length === 0) {
+    const nextEdgeIdx = incident[Math.floor(Math.random() * incident.length)];
+    const nextEdge = edges[nextEdgeIdx];
+    const fromNext = nextEdge.fromNodeIdx === atNode;
+    v.currentEdge = nextEdgeIdx;
+    v.targetNode = fromNext ? nextEdge.toNodeIdx : nextEdge.fromNodeIdx;
+    v.towardEnd = fromNext;
+    v.t = fromNext ? 0 : 1;
+    return;
+  }
+
+  let nearestCrime = null;
+  let nearestDist = ATTRACTION_RADIUS_M + 1;
+  for (const c of activeCrimes) {
+    const d = haversineMeters(atPos, [c.lat, c.lng]);
+    if (d < nearestDist) {
+      nearestDist = d;
+      nearestCrime = c;
+    }
+  }
+
+  if (!nearestCrime) {
+    const nextEdgeIdx = incident[Math.floor(Math.random() * incident.length)];
+    const nextEdge = edges[nextEdgeIdx];
+    const fromNext = nextEdge.fromNodeIdx === atNode;
+    v.currentEdge = nextEdgeIdx;
+    v.targetNode = fromNext ? nextEdge.toNodeIdx : nextEdge.fromNodeIdx;
+    v.towardEnd = fromNext;
+    v.t = fromNext ? 0 : 1;
+    return;
+  }
+
+  const crimePos = [nearestCrime.lat, nearestCrime.lng];
+  let bestEdgeIdx = incident[0];
+  let bestDist = Infinity;
+  for (const ei of incident) {
+    const e = edges[ei];
+    const otherNode = e.fromNodeIdx === atNode ? e.toNodeIdx : e.fromNodeIdx;
+    const otherPos = nodes[otherNode];
+    if (!otherPos) continue;
+    const d = haversineMeters(otherPos, crimePos);
+    if (d < bestDist) {
+      bestDist = d;
+      bestEdgeIdx = ei;
+    }
+  }
+  const nextEdge = edges[bestEdgeIdx];
   const fromNext = nextEdge.fromNodeIdx === atNode;
-  v.currentEdge = nextEdgeIdx;
+  v.currentEdge = bestEdgeIdx;
   v.targetNode = fromNext ? nextEdge.toNodeIdx : nextEdge.fromNodeIdx;
   v.towardEnd = fromNext;
   v.t = fromNext ? 0 : 1;
@@ -196,4 +248,12 @@ export function startSimulation() {
  */
 export function getPositions() {
   return positions;
+}
+
+/**
+ * Set active crime locations so vehicles within ATTRACTION_RADIUS_M steer toward them.
+ * @param {Array<{ lat: number, lng: number }>} crimes
+ */
+export function setActiveCrimes(crimes) {
+  activeCrimes = Array.isArray(crimes) ? crimes : [];
 }

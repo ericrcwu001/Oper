@@ -13,12 +13,15 @@ interface MicControlProps {
   onRecordingComplete?: (blob: Blob) => void
   /** When true, show a loading state (e.g. while backend is processing voice). */
   sending?: boolean
+  /** When true, reduce padding and gaps for a tighter layout. */
+  compact?: boolean
 }
 
 export function MicControl({
   disabled,
   onRecordingComplete,
   sending = false,
+  compact = false,
 }: MicControlProps) {
   const [ptt, setPtt] = useState(false)
   const [handsFree, setHandsFree] = useState(false)
@@ -120,11 +123,11 @@ export function MicControl({
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-3">
+    <div className={cn("flex flex-col", compact ? "gap-1.5" : "gap-3")}>
+      <div className={cn("flex items-center flex-wrap", compact ? "gap-2" : "gap-3")}>
         <Button
           variant={active ? "default" : "outline"}
-          size="sm"
+          size={compact ? "icon" : "sm"}
           disabled={disabled || sending}
           onMouseDown={handlePtTDown}
           onMouseUp={handlePtTUp}
@@ -137,23 +140,22 @@ export function MicControl({
             e.preventDefault()
             handlePtTUp()
           }}
-          className="gap-2 touch-none select-none"
-          aria-label="Push to talk"
+          className={cn("touch-none select-none", compact ? "h-8 w-8" : "gap-2")}
+          aria-label={sending ? "Sending" : active ? "Listening" : "Push to talk"}
+          title={sending ? "Sending..." : handsFree ? "Listening" : "Push to Talk"}
         >
           {sending ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
+            <Loader2 className={cn(compact ? "h-3.5 w-3.5" : "h-4 w-4", "animate-spin")} />
           ) : active ? (
-            <Mic className="h-4 w-4" />
+            <Mic className={compact ? "h-3.5 w-3.5" : "h-4 w-4"} />
           ) : (
-            <MicOff className="h-4 w-4" />
+            <MicOff className={compact ? "h-3.5 w-3.5" : "h-4 w-4"} />
           )}
-          {sending
-            ? "Sending..."
-            : handsFree
-              ? "Listening"
-              : "Push to Talk"}
+          {!compact && (
+            sending ? "Sending..." : handsFree ? "Listening" : "Push to Talk"
+          )}
         </Button>
-        <div className="flex items-center gap-2">
+        <div className={cn("flex items-center", compact ? "gap-1.5" : "gap-2")}>
           <Switch
             id="hands-free"
             checked={handsFree}
@@ -163,21 +165,21 @@ export function MicControl({
           />
           <Label
             htmlFor="hands-free"
-            className="flex items-center gap-1 text-xs text-muted-foreground"
+            className={cn("flex items-center text-muted-foreground", compact ? "gap-1 text-[10px]" : "gap-1 text-xs")}
           >
-            <Hand className="h-3 w-3" />
+            <Hand className={compact ? "h-2.5 w-2.5" : "h-3 w-3"} />
             Hands-free
           </Label>
         </div>
       </div>
       {error && (
-        <p className="text-xs text-destructive">{error}</p>
+        <p className={cn("text-destructive", compact ? "text-[10px]" : "text-xs")}>{error}</p>
       )}
-      <div className="flex items-center gap-2">
-        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+      <div className={cn("flex items-center min-w-0", compact ? "gap-1.5" : "gap-2")}>
+        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground shrink-0">
           Level
         </span>
-        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-secondary">
+        <div className="h-1 flex-1 min-w-0 overflow-hidden rounded-full bg-secondary">
           <div
             className={cn(
               "h-full rounded-full transition-all duration-150",

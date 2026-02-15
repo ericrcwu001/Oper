@@ -11,10 +11,11 @@ import {
   SF_DEFAULT_ZOOM,
   MAP_POINT_COLORS,
   MAP_POINT_OUTLINE_COLOR,
-  MAP_POINT_RADIUS_BY_ZOOM,
   MAP_POINT_RADIUS_SELECTED_BY_ZOOM,
   MAP_POINT_RADIUS_UNIT_BY_ZOOM,
   MAP_POINT_RADIUS_UNIT_SELECTED_BY_ZOOM,
+  CRIME_POINT_RADIUS_BY_ZOOM,
+  CRIME_POINT_STROKE_COLOR,
   MAP_POINT_911_BEACON_HEIGHT_M,
   MAP_POINT_911_BEACON_COLOR,
   MAP_POINT_911_BEACON_FOOTPRINT,
@@ -44,6 +45,7 @@ function pointsToGeoJSON(points: MapPoint[]): GeoJSON.FeatureCollection {
         type: p.type,
         selected: p.selected ?? false,
         disabled: p.disabled ?? false,
+        radiusScale: p.radiusScale ?? 1,
       },
     })),
   }
@@ -177,18 +179,22 @@ export function SFMap({
     }
   }, [defaultCenter, defaultZoom])
 
-  // Add points source + layer after style loads
+  // Add points source + layer after style loads (style.load or load so we catch when map is ready)
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
 
-    const onStyleLoad = () => {
+    const addPointsLayer = () => {
       if (map.getSource(POINTS_SOURCE_ID)) return
 
-      const flatRadius = MAP_POINT_RADIUS_BY_ZOOM.flat()
+      // Units (police/fire/ambulance): smaller radii from HEAD
       const flatRadiusUnit = MAP_POINT_RADIUS_UNIT_BY_ZOOM.flat()
-      const flatRadiusSelected = MAP_POINT_RADIUS_SELECTED_BY_ZOOM.flat()
       const flatRadiusUnitSelected = MAP_POINT_RADIUS_UNIT_SELECTED_BY_ZOOM.flat()
+      // Crime and 911: same size from main (CRIME_POINT_RADIUS_BY_ZOOM)
+      const flatCrimeRadius = CRIME_POINT_RADIUS_BY_ZOOM.flat()
+      const flatCrimeRadiusSelected = MAP_POINT_RADIUS_SELECTED_BY_ZOOM.map(
+        ([z, r]) => [z, r * 2]
+      ).flat() as number[]
       const withSelection = (pointsRef.current ?? []).map((p) => ({
         ...p,
         selected: p.id === (selectedPointIdRef.current ?? null),
@@ -219,8 +225,13 @@ export function SFMap({
             "#9ca3af",
           ],
         ],
-        "circle-stroke-width": 1.8,
-        "circle-stroke-color": MAP_POINT_OUTLINE_COLOR,
+        "circle-stroke-width": ["case", ["==", ["get", "type"], "crime"], 2.5, 1.8],
+        "circle-stroke-color": [
+          "case",
+          ["==", ["get", "type"], "crime"],
+          CRIME_POINT_STROKE_COLOR,
+          MAP_POINT_OUTLINE_COLOR,
+        ],
         "circle-opacity": ["case", ["get", "disabled"], 0.4, 0.98],
       }
 
@@ -242,7 +253,7 @@ export function SFMap({
         filter: filterUnselectedCrime,
         paint: {
           ...paintBase,
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatRadius],
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatCrimeRadius],
         } as CirclePaint,
       })
 
@@ -266,7 +277,7 @@ export function SFMap({
         filter: filterSelectedCrime,
         paint: {
           ...paintBase,
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatRadiusSelected],
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatCrimeRadiusSelected],
         } as CirclePaint,
       })
 
@@ -282,7 +293,7 @@ export function SFMap({
         } as CirclePaint,
       })
 
-      // 911 unselected (on top)
+      // 911 unselected (on top) — same size as crime
       map.addLayer({
         id: POINTS_LAYER_911_ID,
         type: "circle",
@@ -290,11 +301,11 @@ export function SFMap({
         filter: filterUnselected911,
         paint: {
           ...paintBase,
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatRadius],
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatCrimeRadius],
         } as CirclePaint,
       })
 
-      // 911 selected (on top)
+      // 911 selected (on top) — same size as crime
       map.addLayer({
         id: POINTS_LAYER_SELECTED_911_ID,
         type: "circle",
@@ -302,7 +313,7 @@ export function SFMap({
         filter: filterSelected911,
         paint: {
           ...paintBase,
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatRadiusSelected],
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatCrimeRadiusSelected],
         } as CirclePaint,
       })
 
@@ -351,11 +362,13 @@ export function SFMap({
       }
     }
 
-    if (map.isStyleLoaded()) onStyleLoad()
-    else map.on("style.load", onStyleLoad)
+    if (map.isStyleLoaded()) addPointsLayer()
+    else map.on("style.load", addPointsLayer)
+    map.on("load", addPointsLayer)
 
     return () => {
-      map.off("style.load", onStyleLoad)
+      map.off("style.load", addPointsLayer)
+      map.off("load", addPointsLayer)
     }
   }, [])
 
@@ -477,6 +490,7 @@ export function SFMap({
     if (!map || !onSelectPoint || !pointsLayerReady) return
 
     const handleClick = (e: maplibregl.MapMouseEvent) => {
+      if (!map.getLayer(POINTS_LAYER_ID)) return
       const features = map.queryRenderedFeatures(e.point, {
         layers: [POINTS_LAYER_ID, POINTS_LAYER_UNIT_ID, POINTS_LAYER_SELECTED_ID, POINTS_LAYER_SELECTED_UNIT_ID, POINTS_LAYER_911_ID, POINTS_LAYER_SELECTED_911_ID],
       })
@@ -503,6 +517,7 @@ export function SFMap({
     if (!map || !pointsLayerReady) return
 
     const handleMouseMove = (e: maplibregl.MapMouseEvent) => {
+      if (!map.getLayer(POINTS_LAYER_ID)) return
       const features = map.queryRenderedFeatures(e.point, {
         layers: [POINTS_LAYER_ID, POINTS_LAYER_UNIT_ID, POINTS_LAYER_SELECTED_ID, POINTS_LAYER_SELECTED_UNIT_ID, POINTS_LAYER_911_ID, POINTS_LAYER_SELECTED_911_ID],
       })

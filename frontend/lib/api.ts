@@ -81,6 +81,19 @@ export async function fetchVehicles(): Promise<MapPoint[]> {
   return (Array.isArray(data) ? data : []) as MapPoint[]
 }
 
+/**
+ * Send active crime locations so backend can steer vehicles toward them (real movement along roads).
+ */
+export async function postCrimesForSteering(
+  crimes: { lat: number; lng: number }[]
+): Promise<void> {
+  await fetch(`${API_BASE}/api/vehicles/crimes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ crimes }),
+  })
+}
+
 export async function generateScenario(
   difficulty: "easy" | "medium" | "hard"
 ): Promise<GeneratedScenarioPayload> {

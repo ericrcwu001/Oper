@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Simulates ~40 fire, ~300 police, ~20 ambulance vehicles on SF road network.
+ * Simulates ~25 fire, ~180 police, ~12 ambulance vehicles on SF road network.
  * Writes vehicle-positions.json every 1s. Format matches MapPoint (frontend).
  *
  * Run: node backend/scripts/simulate-emergency-vehicles.js
@@ -24,7 +24,7 @@ const ROADS_PATH = path.join(DATA_DIR, "sf-roads.json");
 const GRAPH_PATH = path.join(DATA_DIR, "sf-roads-graph.json");
 const OUTPUT_PATH = path.join(DATA_DIR, "vehicle-positions.json");
 
-const COUNTS = { fire: 40, police: 300, ambulance: 20 };
+const COUNTS = { fire: 25, police: 180, ambulance: 12 };
 const SPEED_BASE = { fire: 13, police: 11, ambulance: 13 }; // m/s
 const SPEED_VARIANCE = 0.15;
 const DT_SECONDS = 0.1;
