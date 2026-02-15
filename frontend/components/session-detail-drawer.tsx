@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -16,6 +17,7 @@ import {
   StickyNote,
   FileText,
   MessageSquare,
+  ExternalLink,
 } from "lucide-react"
 import type { Session } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -59,6 +61,12 @@ export function SessionDetailDrawer({
               {session.difficulty}
             </Badge>
           </SheetTitle>
+          <Button variant="outline" size="sm" asChild className="mt-2 gap-2">
+            <Link href={`/simulation/${session.id}/review?scenario=${session.scenarioId}`}>
+              <ExternalLink className="h-3.5 w-3.5" />
+              View full review
+            </Link>
+          </Button>
         </SheetHeader>
 
         <ScrollArea className="mt-4 h-[calc(100vh-100px)] pr-2">

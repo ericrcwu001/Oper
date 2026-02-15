@@ -880,11 +880,11 @@ export function SFMap({
 
       const fields: { label: string; value?: string }[] = is911
         ? [
-            { label: "Location", value: point.location },
-            { label: "Description", value: point.description },
-            { label: "Caller ID", value: point.callerId },
-            { label: "Caller name", value: point.callerName },
-            { label: "Time received", value: point.timestamp },
+            { label: "Location", value: point.location ?? "Unknown" },
+            { label: "Description", value: point.description ?? "Unknown" },
+            { label: "Caller ID", value: point.callerId ?? "—" },
+            { label: "Caller name", value: point.callerName ?? "Unknown" },
+            { label: "Time received", value: point.timestamp ?? "—" },
           ]
         : isCrime
           ? [
