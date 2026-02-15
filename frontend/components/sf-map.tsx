@@ -28,6 +28,7 @@ import {
   CRIME_POINT_STROKE_COLOR,
   MAP_POINT_RECOMMENDED_STROKE_COLOR,
   MAP_POINT_RECOMMENDED_RING_RADIUS_BY_ZOOM,
+  MAP_POINT_UNIT_IDLE_RADIUS_SCALE,
   MAP_LABEL_ZOOM_911,
   MAP_LABEL_ZOOM_UNITS,
 } from "@/lib/map-constants"
@@ -234,7 +235,10 @@ function pointsToEllipseGeoJSON(
   const cosPitch = Math.max(0.1, Math.cos((pitchDeg * Math.PI) / 180))
   const features: GeoJSON.Feature<GeoJSON.Polygon>[] = points.map((p) => {
     const selected = p.id === selectedPointId
-    const radiusPx = getRadiusPxForPoint(zoom, p.type, selected) * ELLIPSE_RADIUS_SCALE
+    let radiusPx = getRadiusPxForPoint(zoom, p.type, selected) * ELLIPSE_RADIUS_SCALE
+    const isUnit = p.type === "police" || p.type === "fire" || p.type === "ambulance"
+    const isIdle = p.status !== 1 && p.status !== true
+    if (isUnit && isIdle) radiusPx *= MAP_POINT_UNIT_IDLE_RADIUS_SCALE
     const radiusLonDeg = beaconRadiusDegrees(zoom, p.lat, radiusPx)
     const radiusLatDeg = radiusLonDeg * cosPitch
     return {
@@ -294,8 +298,10 @@ function pointsCrimeToBeaconGeoJSON(points: MapPoint[], zoom: number, radiusPx: 
 const POINTS_SOURCE_ID = "map-points"
 const POINTS_LAYER_ID = "map-points-circles"
 const POINTS_LAYER_UNIT_ID = "map-points-circles-unit"
+const POINTS_LAYER_UNIT_IDLE_ID = "map-points-circles-unit-idle"
 const POINTS_LAYER_SELECTED_ID = "map-points-circles-selected"
 const POINTS_LAYER_SELECTED_UNIT_ID = "map-points-circles-selected-unit"
+const POINTS_LAYER_SELECTED_UNIT_IDLE_ID = "map-points-circles-selected-unit-idle"
 const POINTS_LAYER_911_ID = "map-points-circles-911"
 const POINTS_LAYER_SELECTED_911_ID = "map-points-circles-selected-911"
 const POINTS_LAYER_RECOMMENDED_ID = "map-points-circles-recommended"
@@ -320,6 +326,24 @@ const PITCH_ELLIPSE_THRESHOLD_DEG = 10
 /** Hysteresis: use ellipses above this pitch, use circles below PITCH_USE_CIRCLE_DEG. Avoids flicker at threshold. */
 const PITCH_USE_ELLIPSE_DEG = 13
 const PITCH_USE_CIRCLE_DEG = 8
+
+/** Layer IDs used for point hit-testing; filter by map.getLayer(id) before queryRenderedFeatures to avoid errors when style is still loading. */
+const POINTS_QUERY_LAYER_IDS = [
+  POINTS_LAYER_ID,
+  POINTS_LAYER_UNIT_ID,
+  POINTS_LAYER_UNIT_IDLE_ID,
+  POINTS_LAYER_SELECTED_ID,
+  POINTS_LAYER_SELECTED_UNIT_ID,
+  POINTS_LAYER_SELECTED_UNIT_IDLE_ID,
+  POINTS_LAYER_911_ID,
+  POINTS_LAYER_SELECTED_911_ID,
+  POINTS_ELLIPSE_LAYER_ID,
+  POINTS_ELLIPSE_LAYER_UNIT_ID,
+  POINTS_ELLIPSE_LAYER_SELECTED_ID,
+  POINTS_ELLIPSE_LAYER_SELECTED_UNIT_ID,
+  POINTS_ELLIPSE_LAYER_911_ID,
+  POINTS_ELLIPSE_LAYER_SELECTED_911_ID,
+] as const
 
 const FILTER_UNIT: maplibregl.FilterSpecification = [
   "any",
@@ -463,9 +487,17 @@ export function SFMap({
     const addPointsLayer = () => {
       if (map.getSource(POINTS_SOURCE_ID)) return
 
-      // Units (police/fire/ambulance): smaller radii
+      // Units (police/fire/ambulance): smaller radii; idle = 25% larger (separate layers so zoom stays top-level)
       const flatRadiusUnit = MAP_POINT_RADIUS_UNIT_BY_ZOOM.flat()
       const flatRadiusUnitSelected = MAP_POINT_RADIUS_UNIT_SELECTED_BY_ZOOM.flat()
+      const flatRadiusUnitIdle = MAP_POINT_RADIUS_UNIT_BY_ZOOM.map(([z, r]) => [
+        z,
+        r * MAP_POINT_UNIT_IDLE_RADIUS_SCALE,
+      ]).flat()
+      const flatRadiusUnitSelectedIdle = MAP_POINT_RADIUS_UNIT_SELECTED_BY_ZOOM.map(([z, r]) => [
+        z,
+        r * MAP_POINT_UNIT_IDLE_RADIUS_SCALE,
+      ]).flat()
       // Crime and 911: same size (CRIME_POINT_RADIUS_BY_ZOOM)
       const flatCrimeRadius = CRIME_POINT_RADIUS_BY_ZOOM.flat()
       const flatCrimeRadiusSelected = MAP_POINT_RADIUS_SELECTED_BY_ZOOM.map(
@@ -528,8 +560,12 @@ export function SFMap({
       const selected: maplibregl.FilterSpecification = ["get", "selected"]
       const filterUnselectedCrime = ["all", unselected, FILTER_CRIME] as maplibregl.FilterSpecification
       const filterUnselectedUnit = ["all", unselected, FILTER_UNIT] as maplibregl.FilterSpecification
+      const filterUnselectedUnitEnRoute = ["all", unselected, FILTER_UNIT, ["==", ["get", "status"], true]] as maplibregl.FilterSpecification
+      const filterUnselectedUnitIdle = ["all", unselected, FILTER_UNIT, ["==", ["get", "status"], false]] as maplibregl.FilterSpecification
       const filterSelectedCrime = ["all", selected, FILTER_CRIME] as maplibregl.FilterSpecification
       const filterSelectedUnit = ["all", selected, FILTER_UNIT] as maplibregl.FilterSpecification
+      const filterSelectedUnitEnRoute = ["all", selected, FILTER_UNIT, ["==", ["get", "status"], true]] as maplibregl.FilterSpecification
+      const filterSelectedUnitIdle = ["all", selected, FILTER_UNIT, ["==", ["get", "status"], false]] as maplibregl.FilterSpecification
       const filterUnselected911 = ["all", unselected, FILTER_911] as maplibregl.FilterSpecification
       const filterSelected911 = ["all", selected, FILTER_911] as maplibregl.FilterSpecification
 
@@ -545,15 +581,26 @@ export function SFMap({
         } as CirclePaint,
       })
 
-      // Unselected police/fire/ambulance (slightly smaller)
+      // Unselected police/fire/ambulance en route (normal radius)
       map.addLayer({
         id: POINTS_LAYER_UNIT_ID,
         type: "circle",
         source: POINTS_SOURCE_ID,
-        filter: filterUnselectedUnit,
+        filter: filterUnselectedUnitEnRoute,
         paint: {
           ...paintBase,
           "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatRadiusUnit],
+        } as CirclePaint,
+      })
+      // Unselected police/fire/ambulance idle (25% larger radius)
+      map.addLayer({
+        id: POINTS_LAYER_UNIT_IDLE_ID,
+        type: "circle",
+        source: POINTS_SOURCE_ID,
+        filter: filterUnselectedUnitIdle,
+        paint: {
+          ...paintBase,
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatRadiusUnitIdle],
         } as CirclePaint,
       })
 
@@ -569,15 +616,26 @@ export function SFMap({
         } as CirclePaint,
       })
 
-      // Selected police/fire/ambulance (slightly smaller)
+      // Selected police/fire/ambulance en route (normal radius)
       map.addLayer({
         id: POINTS_LAYER_SELECTED_UNIT_ID,
         type: "circle",
         source: POINTS_SOURCE_ID,
-        filter: filterSelectedUnit,
+        filter: filterSelectedUnitEnRoute,
         paint: {
           ...paintBase,
           "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatRadiusUnitSelected],
+        } as CirclePaint,
+      })
+      // Selected police/fire/ambulance idle (25% larger radius)
+      map.addLayer({
+        id: POINTS_LAYER_SELECTED_UNIT_IDLE_ID,
+        type: "circle",
+        source: POINTS_SOURCE_ID,
+        filter: filterSelectedUnitIdle,
+        paint: {
+          ...paintBase,
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatRadiusUnitSelectedIdle],
         } as CirclePaint,
       })
 
@@ -692,8 +750,10 @@ export function SFMap({
       // Keep circles visible when flat, hidden when pitched. Recommended (closest-available) ring stays visible in 3D.
       map.setLayoutProperty(POINTS_LAYER_ID, "visibility", circleVisibility)
       map.setLayoutProperty(POINTS_LAYER_UNIT_ID, "visibility", circleVisibility)
+      map.setLayoutProperty(POINTS_LAYER_UNIT_IDLE_ID, "visibility", circleVisibility)
       map.setLayoutProperty(POINTS_LAYER_SELECTED_ID, "visibility", circleVisibility)
       map.setLayoutProperty(POINTS_LAYER_SELECTED_UNIT_ID, "visibility", circleVisibility)
+      map.setLayoutProperty(POINTS_LAYER_SELECTED_UNIT_IDLE_ID, "visibility", circleVisibility)
       map.setLayoutProperty(POINTS_LAYER_911_ID, "visibility", circleVisibility)
       map.setLayoutProperty(POINTS_LAYER_SELECTED_911_ID, "visibility", circleVisibility)
       if (map.getLayer(POINTS_LAYER_RECOMMENDED_ID)) {
@@ -895,8 +955,10 @@ export function SFMap({
       for (const id of [
         POINTS_LAYER_ID,
         POINTS_LAYER_UNIT_ID,
+        POINTS_LAYER_UNIT_IDLE_ID,
         POINTS_LAYER_SELECTED_ID,
         POINTS_LAYER_SELECTED_UNIT_ID,
+        POINTS_LAYER_SELECTED_UNIT_IDLE_ID,
         POINTS_LAYER_911_ID,
         POINTS_LAYER_SELECTED_911_ID,
       ]) {
@@ -1048,22 +1110,9 @@ export function SFMap({
 
     const handleClick = (e: maplibregl.MapMouseEvent) => {
       if (!map.getLayer(POINTS_LAYER_ID)) return
-      const features = map.queryRenderedFeatures(e.point, {
-        layers: [
-          POINTS_LAYER_ID,
-          POINTS_LAYER_UNIT_ID,
-          POINTS_LAYER_SELECTED_ID,
-          POINTS_LAYER_SELECTED_UNIT_ID,
-          POINTS_LAYER_911_ID,
-          POINTS_LAYER_SELECTED_911_ID,
-          POINTS_ELLIPSE_LAYER_ID,
-          POINTS_ELLIPSE_LAYER_UNIT_ID,
-          POINTS_ELLIPSE_LAYER_SELECTED_ID,
-          POINTS_ELLIPSE_LAYER_SELECTED_UNIT_ID,
-          POINTS_ELLIPSE_LAYER_911_ID,
-          POINTS_ELLIPSE_LAYER_SELECTED_911_ID,
-        ],
-      })
+      const layers = POINTS_QUERY_LAYER_IDS.filter((id) => map.getLayer(id))
+      if (layers.length === 0) return
+      const features = map.queryRenderedFeatures(e.point, { layers })
       if (features.length === 0) return
       const feature = features[0]
       const id = feature.properties?.id as string | undefined
@@ -1089,22 +1138,9 @@ export function SFMap({
 
     const handleMouseMove = (e: maplibregl.MapMouseEvent) => {
       if (!map.getLayer(POINTS_LAYER_ID)) return
-      const features = map.queryRenderedFeatures(e.point, {
-        layers: [
-          POINTS_LAYER_ID,
-          POINTS_LAYER_UNIT_ID,
-          POINTS_LAYER_SELECTED_ID,
-          POINTS_LAYER_SELECTED_UNIT_ID,
-          POINTS_LAYER_911_ID,
-          POINTS_LAYER_SELECTED_911_ID,
-          POINTS_ELLIPSE_LAYER_ID,
-          POINTS_ELLIPSE_LAYER_UNIT_ID,
-          POINTS_ELLIPSE_LAYER_SELECTED_ID,
-          POINTS_ELLIPSE_LAYER_SELECTED_UNIT_ID,
-          POINTS_ELLIPSE_LAYER_911_ID,
-          POINTS_ELLIPSE_LAYER_SELECTED_911_ID,
-        ],
-      })
+      const layers = POINTS_QUERY_LAYER_IDS.filter((id) => map.getLayer(id))
+      if (layers.length === 0) return
+      const features = map.queryRenderedFeatures(e.point, { layers })
       map.getCanvas().style.cursor = features.length > 0 ? "pointer" : ""
     }
 

@@ -72,6 +72,9 @@ export const MAP_POINT_RADIUS_UNIT_SELECTED_BY_ZOOM: [number, number][] = [
   [16, 7],
 ]
 
+/** Scale factor for unit circle radius when idle (available). En route = 1, idle = this value (25% larger). */
+export const MAP_POINT_UNIT_IDLE_RADIUS_SCALE = 1.25
+
 /** 911 call marker when selected (slightly larger than base 911 radius). */
 export const MAP_POINT_911_RADIUS_SELECTED_BY_ZOOM: [number, number][] = [
   [11, 9],
