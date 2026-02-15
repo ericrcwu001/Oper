@@ -49,7 +49,7 @@ function pointsToGeoJSON(points: MapPoint[]): GeoJSON.FeatureCollection {
         disabled: p.disabled ?? false,
         radiusScale: p.radiusScale ?? 1,
         recommended: p.recommended ?? false,
-        status: p.status === true,
+        status: p.status === 1 || p.status === true,
       },
     })),
   }
@@ -150,7 +150,7 @@ function pointsToEllipseGeoJSON(
         type: p.type,
         selected: selected,
         disabled: p.disabled ?? false,
-        status: p.status === true,
+        status: p.status === 1 || p.status === true,
       },
     }
   })
@@ -210,6 +210,9 @@ const POINTS_ELLIPSE_LAYER_SELECTED_UNIT_ID = "map-points-ellipses-fill-selected
 const POINTS_ELLIPSE_LAYER_911_ID = "map-points-ellipses-fill-911"
 const POINTS_ELLIPSE_LAYER_SELECTED_911_ID = "map-points-ellipses-fill-selected-911"
 const PITCH_ELLIPSE_THRESHOLD_DEG = 5
+/** Hysteresis: use ellipses above this pitch, use circles below PITCH_USE_CIRCLE_DEG. Avoids flicker at threshold. */
+const PITCH_USE_ELLIPSE_DEG = 8
+const PITCH_USE_CIRCLE_DEG = 3
 
 const FILTER_UNIT: maplibregl.FilterSpecification = [
   "any",
@@ -248,6 +251,7 @@ export function SFMap({
   const pointsRef = useRef<MapPoint[]>(points)
   const selectedPointIdRef = useRef<string | null>(selectedPointId)
   const pitchRef = useRef<number>(0)
+  const useEllipseModeRef = useRef<boolean>(false)
   const lastFlyToRef = useRef<{ lat: number; lng: number } | null>(null)
   const [pointsLayerReady, setPointsLayerReady] = useState(false)
   const [pointsVersion, setPointsVersion] = useState(0)
@@ -290,7 +294,7 @@ export function SFMap({
     }
   }, [defaultCenter, defaultZoom])
 
-  // Fly to target when flyToTarget is set (e.g. from dispatch list click)
+  // Fly to target when flyToTarget is set (e.g. from dispatch list click). Re-run when map becomes ready so early clicks still fly.
   useEffect(() => {
     if (!flyToTarget) return
     const map = mapRef.current
@@ -310,7 +314,7 @@ export function SFMap({
     return () => {
       map.off("moveend", onComplete)
     }
-  }, [flyToTarget, onFlyToComplete])
+  }, [flyToTarget, onFlyToComplete, pointsLayerReady])
 
   // Add points source + layer after style loads (style.load or load so we catch when map is ready)
   useEffect(() => {
@@ -375,7 +379,7 @@ export function SFMap({
           ["get", "disabled"],
           0.4,
           ["all", ["in", ["get", "type"], ["literal", ["police", "fire", "ambulance"]]], ["==", ["get", "status"], true]],
-          0.45,
+          0.35,
           0.98,
         ],
       }
@@ -672,26 +676,15 @@ export function SFMap({
     }
   }, [pointsLayerReady])
 
-  // When pitch/zoom changes: update ellipse data and switch circle vs ellipse visibility (3D = ovals)
+  // When pitch/zoom changes: update ellipse data and switch circle vs ellipse visibility (3D = ovals).
+  // Hysteresis prevents flicker when pitch hovers near the threshold; ellipse setData only on moveend/pitchend to keep unavailable styling stable during drag.
   useEffect(() => {
     const map = mapRef.current
     if (!map || !pointsLayerReady) return
 
-    const updatePitchAndEllipses = () => {
-      const pitch = map.getPitch()
-      pitchRef.current = pitch
-      const zoom = map.getZoom()
-      const pts = pointsRef.current ?? []
-      const sel = selectedPointIdRef.current ?? null
-      const ellipseSource = map.getSource(POINTS_ELLIPSE_SOURCE_ID) as maplibregl.GeoJSONSource
-      if (!ellipseSource) return
-
-      ellipseSource.setData(pointsToEllipseGeoJSON(pts, zoom, pitch, sel))
-
-      const useEllipses = pitch > PITCH_ELLIPSE_THRESHOLD_DEG
+    const applyVisibility = (useEllipses: boolean) => {
       const ellipseVis = useEllipses ? "visible" : "none"
       const circleVis = useEllipses ? "none" : "visible"
-
       for (const id of [
         POINTS_LAYER_ID,
         POINTS_LAYER_UNIT_ID,
@@ -702,7 +695,6 @@ export function SFMap({
       ]) {
         if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", circleVis)
       }
-      // Recommended (closest-available) ring stays visible in 3D so highlighting is not lost when tilted
       if (map.getLayer(POINTS_LAYER_RECOMMENDED_ID)) {
         map.setLayoutProperty(POINTS_LAYER_RECOMMENDED_ID, "visibility", useEllipses ? "visible" : circleVis)
       }
@@ -718,12 +710,33 @@ export function SFMap({
       }
     }
 
-    map.on("move", updatePitchAndEllipses)
+    const updateVisibilityOnly = () => {
+      const pitch = map.getPitch()
+      pitchRef.current = pitch
+      if (pitch > PITCH_USE_ELLIPSE_DEG) useEllipseModeRef.current = true
+      else if (pitch < PITCH_USE_CIRCLE_DEG) useEllipseModeRef.current = false
+      applyVisibility(useEllipseModeRef.current)
+    }
+
+    const updatePitchAndEllipses = () => {
+      const pitch = map.getPitch()
+      pitchRef.current = pitch
+      const zoom = map.getZoom()
+      const pts = pointsRef.current ?? []
+      const sel = selectedPointIdRef.current ?? null
+      const ellipseSource = map.getSource(POINTS_ELLIPSE_SOURCE_ID) as maplibregl.GeoJSONSource
+      if (ellipseSource) ellipseSource.setData(pointsToEllipseGeoJSON(pts, zoom, pitch, sel))
+      if (pitch > PITCH_USE_ELLIPSE_DEG) useEllipseModeRef.current = true
+      else if (pitch < PITCH_USE_CIRCLE_DEG) useEllipseModeRef.current = false
+      applyVisibility(useEllipseModeRef.current)
+    }
+
+    map.on("move", updateVisibilityOnly)
     map.on("moveend", updatePitchAndEllipses)
     map.on("pitchend", updatePitchAndEllipses)
     updatePitchAndEllipses()
     return () => {
-      map.off("move", updatePitchAndEllipses)
+      map.off("move", updateVisibilityOnly)
       map.off("moveend", updatePitchAndEllipses)
       map.off("pitchend", updatePitchAndEllipses)
     }

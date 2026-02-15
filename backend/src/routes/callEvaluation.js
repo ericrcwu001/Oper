@@ -26,8 +26,13 @@ router.get('/closest', (req, res) => {
       ...(byType.police || []),
       ...(byType.fire || []),
     ].map((u) => u.id);
+    const closestVehicleByType = {
+      ambulance: byType.ambulance?.[0]?.id ?? null,
+      police: byType.police?.[0]?.id ?? null,
+      fire: byType.fire?.[0]?.id ?? null,
+    };
 
-    res.json({ closestVehicleIds });
+    res.json({ closestVehicleIds, closestVehicleByType });
   } catch (e) {
     res.status(500).json({ error: e.message || 'Closest units failed' });
   }
