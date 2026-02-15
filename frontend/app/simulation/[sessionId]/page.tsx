@@ -129,11 +129,24 @@ function build911MapPoint(
   callActive: boolean,
   callSeconds: number
 ): MapPoint {
-  const loc = scenarioCallLocation ?? {
-    lat: DEFAULT_911_POINT.lat,
-    lng: DEFAULT_911_POINT.lng,
-    address: DEFAULT_911_POINT.location ?? "San Francisco, CA",
-  }
+  // Use scenario location from generator (lat/lng in structured output); prefer scenarioCallLocation then payload.scenario.location
+  const fromPayload =
+    scenarioPayload?.scenario?.location &&
+    typeof scenarioPayload.scenario.location.lat === "number" &&
+    typeof scenarioPayload.scenario.location.lng === "number"
+      ? {
+          lat: scenarioPayload.scenario.location.lat,
+          lng: scenarioPayload.scenario.location.lng,
+          address: scenarioPayload.scenario.location.address ?? "San Francisco, CA",
+        }
+      : null
+  const loc =
+    scenarioCallLocation ??
+    fromPayload ?? {
+      lat: DEFAULT_911_POINT.lat,
+      lng: DEFAULT_911_POINT.lng,
+      address: DEFAULT_911_POINT.location ?? "San Francisco, CA",
+    }
   const callerMessages = conversationHistory
     .filter((t) => t.role === "caller")
     .map((t) => t.content)
@@ -399,7 +412,31 @@ export default function LiveSimulationPage({
   const [apiLoading, setApiLoading] = useState(false)
   const [apiError, setApiError] = useState<string | null>(null)
   const [notes, setNotes] = useState<NoteEntry[]>([])
-  const [mapPoints, setMapPoints] = useState<MapPoint[]>(() => getInitialMapPoints())
+  const [mapPoints, setMapPoints] = useState<MapPoint[]>(() => {
+    try {
+      const raw =
+        typeof sessionStorage !== "undefined" &&
+        sessionStorage.getItem(`${GENERATED_SCENARIO_STORAGE_KEY}-${sessionId}`)
+      if (raw) {
+        const payload = JSON.parse(raw) as GeneratedScenarioPayload
+        const loc = payload?.scenario?.location
+        if (
+          loc &&
+          typeof loc.lat === "number" &&
+          typeof loc.lng === "number"
+        ) {
+          return getInitialMapPoints({
+            lat: loc.lat,
+            lng: loc.lng,
+            address: loc.address ?? "San Francisco, CA",
+          })
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return getInitialMapPoints()
+  })
   const [selectedPointId, setSelectedPointId] = useState<string | null>(null)
   // SF crimes feed: visible until enough vehicles at scene for long enough
   const [crimesFromApi, setCrimesFromApi] = useState<CrimeRecord[]>([])
@@ -490,6 +527,15 @@ export default function LiveSimulationPage({
     const ids = new Set(highlightedVehicleIds)
     return mapPoints.map((p) => ({ ...p, recommended: ids.has(p.id) }))
   }, [mapPoints, highlightedVehicleIds])
+
+  // Only show 911 call point on map after "Start call" is pressed
+  const mapPointsForDisplay = useMemo(
+    () =>
+      callActive
+        ? mapPointsWithRecommended
+        : mapPointsWithRecommended.filter((p) => p.type !== "911"),
+    [callActive, mapPointsWithRecommended]
+  )
 
   /** 911 call point for the map: scenario-based and updates as caller reveals info. */
   const current911Point = useMemo(
@@ -802,6 +848,19 @@ export default function LiveSimulationPage({
       setCallActive(true)
       setConnectionStatus("connected")
       setCallSeconds(0)
+      // Pan and zoom map to 911 call point
+      const loc =
+        scenarioCallLocation ??
+        (scenarioPayload?.scenario?.location
+          ? {
+              lat: scenarioPayload.scenario.location.lat,
+              lng: scenarioPayload.scenario.location.lng,
+            }
+          : null)
+      setMapFlyToTarget({
+        lat: loc?.lat ?? DEFAULT_911_POINT.lat,
+        lng: loc?.lng ?? DEFAULT_911_POINT.lng,
+      })
     } catch (e) {
       setApiError(e instanceof Error ? e.message : "Failed to start call")
       setConnectionStatus("disconnected")
@@ -1115,7 +1174,7 @@ export default function LiveSimulationPage({
             <Card className="flex min-h-0 flex-1 flex-col overflow-hidden border bg-card">
               <div className="relative min-h-0 flex-1 w-full">
                 <SFMap
-                  points={mapPointsWithRecommended}
+                  points={mapPointsForDisplay}
                   selectedPointId={selectedPointId}
                   onSelectPoint={setSelectedPointId}
                   flyToTarget={mapFlyToTarget}

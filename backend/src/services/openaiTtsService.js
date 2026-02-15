@@ -1,8 +1,7 @@
 /**
  * OpenAI TTS (text-to-speech) for 911 caller audio.
- * Uses tts-1 (fast, cheap) by default. Voice and speed are derived from
- * scenario payload so the caller expresses emotion (panic, etc.) and
- * reflects background (age, gender).
+ * Uses gpt-4o-mini-tts-2025-03-20 (marin/cedar voices). Voice by gender, speed and
+ * short instructions from scenario for tone and emotion.
  *
  * Re-exports sanitizeCallerResponseText from elevenlabsService for shared use.
  */
@@ -18,21 +17,9 @@ export { sanitizeCallerResponseText };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-/** OpenAI TTS voice options. We map caller gender/age to these. */
-const OPENAI_VOICES = {
-  // More neutral / versatile
-  alloy: 'alloy',
-  echo: 'echo',
-  fable: 'fable',
-  onyx: 'onyx',
-  nova: 'nova',
-  shimmer: 'shimmer',
-};
-
-/** Female-leaning voices (for diversity we alternate by age). */
-const FEMALE_VOICES = ['nova', 'shimmer'];
-/** Male-leaning voices. */
-const MALE_VOICES = ['alloy', 'onyx', 'echo'];
+/** Recommended voices for best quality (OpenAI docs). Gender maps to these. */
+const VOICE_FEMALE = 'marin';
+const VOICE_MALE = 'cedar';
 
 /**
  * Scenario payload shape (subset) for voice/speed selection.
@@ -43,32 +30,28 @@ const MALE_VOICES = ['alloy', 'onyx', 'echo'];
  */
 
 /**
- * Picks an OpenAI TTS voice from scenario payload to reflect caller background
- * (gender, age). Uses gender first, then age for variety (e.g. younger vs older).
+ * Picks marin (female) or cedar (male) from scenario payload. Recommended for best quality.
  *
  * @param {string | ScenarioVoicePayload | undefined} voiceOptions - Legacy string or scenario payload.
- * @returns {string} OpenAI voice id (alloy, echo, fable, onyx, nova, shimmer).
+ * @returns {string} OpenAI voice id: 'marin' or 'cedar'.
  */
 function getOpenAIVoiceFromPayload(voiceOptions) {
   if (voiceOptions === undefined || voiceOptions === null) {
-    return OPENAI_VOICES.alloy;
+    return VOICE_MALE;
   }
   if (typeof voiceOptions === 'string') {
     const lower = voiceOptions.toLowerCase();
     const femaleKeywords = ['woman', 'female', 'girl', 'lady', 'she', 'her ', 'mother', 'wife', 'daughter', 'women'];
-    if (femaleKeywords.some((kw) => lower.includes(kw))) {
-      return FEMALE_VOICES[0]; // nova
-    }
-    return MALE_VOICES[0]; // alloy
+    if (femaleKeywords.some((kw) => lower.includes(kw))) return VOICE_FEMALE;
+    return VOICE_MALE;
   }
   if (typeof voiceOptions !== 'object') {
-    return OPENAI_VOICES.alloy;
+    return VOICE_MALE;
   }
 
   const scenario = voiceOptions.scenario || {};
   const profile = scenario.caller_profile || {};
   const gender = typeof profile.gender === 'string' ? profile.gender.trim().toLowerCase() : '';
-  const age = typeof profile.age === 'number' && !Number.isNaN(profile.age) ? profile.age : null;
   const persona = voiceOptions.persona || {};
   const voiceDesc = typeof persona.voice_description === 'string' ? persona.voice_description.toLowerCase() : '';
 
@@ -80,11 +63,7 @@ function getOpenAIVoiceFromPayload(voiceOptions) {
     return false;
   })();
 
-  const pool = isFemale ? FEMALE_VOICES : MALE_VOICES;
-  // Use age to vary voice within pool (e.g. younger = first, older = second) for diversity.
-  const index = age != null && age >= 50 ? 1 : 0;
-  const voice = pool[index % pool.length];
-  return OPENAI_VOICES[voice] || voice;
+  return isFemale ? VOICE_FEMALE : VOICE_MALE;
 }
 
 /**
@@ -137,60 +116,52 @@ function getSpeedFromPayload(voiceOptions) {
   return DEFAULT;
 }
 
-/** Model id that supports the `instructions` parameter for tone/emotion (only gpt-4o-mini-tts). */
-const INSTRUCTIONS_CAPABLE_MODEL = 'gpt-4o-mini-tts';
+/** Pinned model for natural pacing; supports instructions. Override with OPENAI_TTS_MODEL. */
+const DEFAULT_TTS_MODEL = 'gpt-4o-mini-tts-2025-03-20';
 
 /**
- * Builds natural-language instructions for TTS tone and emotion.
- * Only supported by gpt-4o-mini-tts; ignored for tts-1 / tts-1-hd.
+ * Short, clear instructions for tone and emotion. Used only with gpt-4o-mini-tts*.
  *
  * @param {string | ScenarioVoicePayload | undefined} voiceOptions - Scenario payload or legacy.
  * @param {string} model - Current TTS model id.
- * @returns {string | undefined} Instructions string, or undefined if not supported / default tone.
+ * @returns {string | undefined} Instructions string, or undefined if not supported.
  */
 function getInstructionsFromPayload(voiceOptions, model) {
-  if (model !== INSTRUCTIONS_CAPABLE_MODEL) return undefined;
+  if (!model || !model.startsWith('gpt-4o-mini-tts')) return undefined;
 
   if (voiceOptions === undefined || voiceOptions === null || typeof voiceOptions === 'string') {
-    return 'Speak with concern and light worry in your voice—not flat or robotic.';
+    return 'Concerned, slightly worried. Not flat or robotic.';
   }
 
   const profile = voiceOptions.scenario?.caller_profile || {};
   const emotion = typeof profile.emotion === 'string' ? profile.emotion.trim().toLowerCase() : '';
   const difficulty = voiceOptions.scenario?.difficulty || voiceOptions.difficulty;
 
-  // Panic / confused / desperate → strong emotional instruction
-  const panicKeywords = ['panicked', 'panic', 'frantic', 'desperate', 'hysterical', 'terrified', 'confused', 'disoriented', 'overwhelmed'];
+  const extremePanicKeywords = ['hysterical', 'terrified', 'desperate', 'frantic'];
+  if (emotion && extremePanicKeywords.some((kw) => emotion.includes(kw))) {
+    return 'Extreme panic. Breathless, urgent. Sometimes screaming or shouting. Confused and overwhelmed.';
+  }
+  const panicKeywords = ['panicked', 'panic', 'confused', 'disoriented', 'overwhelmed'];
   if (emotion && panicKeywords.some((kw) => emotion.includes(kw))) {
-    return 'Speak in a panicked, breathless tone. Sound confused, urgent, and emotionally overwhelmed. Use uneven pacing and heightened intensity—like someone in crisis.';
+    return 'Panicked, breathless, urgent. Confused and overwhelmed.';
   }
 
-  // Stressed / anxious
   const stressedKeywords = ['anxious', 'stressed', 'nervous', 'distraught', 'upset', 'scared', 'frightened'];
   if (emotion && stressedKeywords.some((kw) => emotion.includes(kw))) {
-    return 'Speak with clear stress and anxiety. Worried, uneasy tone. Hesitant and emotionally engaged—not calm or flat.';
+    return 'Stressed and anxious. Worried, uneasy. Not calm or flat.';
   }
 
-  // Difficulty fallback when emotion is generic or missing
-  if (difficulty === 'hard') {
-    return 'Speak in a panicked, breathless tone. Sound confused and urgent. Uneven pacing, heightened emotion.';
-  }
-  if (difficulty === 'medium') {
-    return 'Speak with clear stress and anxiety. Worried, uneasy tone. Hesitant and emotionally engaged—not calm or flat.';
-  }
-  if (difficulty === 'easy') {
-    return 'Speak with concern and worry in your voice. You\'re upset about the situation—not calm or robotic. Some emotional weight and slight urgency.';
-  }
-  if (emotion.includes('calm') || emotion.includes('composed')) {
-    return 'Speak calmly and clearly with a steady, composed tone.';
-  }
+  if (difficulty === 'hard') return 'Panicked, breathless, urgent.';
+  if (difficulty === 'medium') return 'Stressed and worried. Uneasy tone.';
+  if (difficulty === 'easy') return 'Concerned and worried. Some urgency.';
+  if (emotion.includes('calm') || emotion.includes('composed')) return 'Calm, steady, clear.';
 
-  return 'Speak with concern and light worry in your voice—not flat or robotic.';
+  return 'Concerned, slightly worried. Not flat or robotic.';
 }
 
 /**
- * Converts text to speech using OpenAI TTS (tts-1 by default).
- * Voice and speed reflect caller profile (gender, age) and emotion (panic, etc.).
+ * Converts text to speech using OpenAI TTS (gpt-4o-mini-tts-2025-03-20).
+ * Voice: marin (female) or cedar (male). Speed and short instructions from scenario.
  *
  * @param {string} text - Dialog text to convert.
  * @param {string} filename - Output filename (e.g. "abc123.mp3").
@@ -208,7 +179,7 @@ export async function textToSpeech(text, filename, voiceOptions) {
   const cleanedText = sanitizeCallerResponseText(text);
   const voice = getOpenAIVoiceFromPayload(voiceOptions);
   const speed = getSpeedFromPayload(voiceOptions);
-  const model = config.openai?.ttsModel || 'tts-1';
+  const model = config.openai?.ttsModel || DEFAULT_TTS_MODEL;
   const instructions = getInstructionsFromPayload(voiceOptions, model);
 
   const openai = new OpenAI({ apiKey });

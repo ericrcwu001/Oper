@@ -320,6 +320,8 @@ export function SFMap({
   const pitchRef = useRef<number>(0)
   const useEllipseModeRef = useRef<boolean>(false)
   const lastFlyToRef = useRef<{ lat: number; lng: number } | null>(null)
+  const onFlyToCompleteRef = useRef(onFlyToComplete)
+  onFlyToCompleteRef.current = onFlyToComplete
   const [pointsLayerReady, setPointsLayerReady] = useState(false)
   const [pointsVersion, setPointsVersion] = useState(0)
   if (pointsRef.current !== points) {
@@ -361,7 +363,7 @@ export function SFMap({
     }
   }, [defaultCenter, defaultZoom])
 
-  // Fly to target when flyToTarget is set (e.g. from dispatch list click). Re-run when map becomes ready so early clicks still fly.
+  // Fly to target when flyToTarget is set. Use manual RAF animation so pan/zoom is always smooth (MapLibre easeTo can snap in some envs).
   useEffect(() => {
     if (!flyToTarget) return
     const map = mapRef.current
@@ -369,19 +371,49 @@ export function SFMap({
     const prev = lastFlyToRef.current
     if (prev && prev.lat === flyToTarget.lat && prev.lng === flyToTarget.lng) return
     lastFlyToRef.current = flyToTarget
-    map.flyTo(
-      { center: [flyToTarget.lng, flyToTarget.lat], zoom: 14 },
-      { duration: 800 }
-    )
+    const targetLat = flyToTarget.lat
+    const targetLng = flyToTarget.lng
+    const targetZoom = 14
     const onComplete = () => {
       lastFlyToRef.current = null
-      onFlyToComplete?.()
+      onFlyToCompleteRef.current?.()
     }
-    map.once("moveend", onComplete)
+    const durationMs = 3000
+    let startTime: number | null = null
+    let startLng: number | null = null
+    let startLat: number | null = null
+    let startZoom: number | null = null
+    let rafId = 0
+    const animate = (timestamp: number) => {
+      const m = mapRef.current
+      if (!m) return
+      if (startTime === null) {
+        startTime = timestamp
+        const c = m.getCenter()
+        startLng = c.lng
+        startLat = c.lat
+        startZoom = m.getZoom()
+      }
+      const elapsed = timestamp - startTime
+      const t = Math.min(elapsed / durationMs, 1)
+      const newLng = (startLng as number) + (targetLng - (startLng as number)) * t
+      const newLat = (startLat as number) + (targetLat - (startLat as number)) * t
+      const newZoom = (startZoom as number) + (targetZoom - (startZoom as number)) * t
+      m.jumpTo({ center: [newLng, newLat], zoom: newZoom })
+      if (t < 1) {
+        rafId = requestAnimationFrame(animate)
+      } else {
+        onComplete()
+      }
+    }
+    const timeoutId = window.setTimeout(() => {
+      rafId = requestAnimationFrame(animate)
+    }, 50)
     return () => {
-      map.off("moveend", onComplete)
+      window.clearTimeout(timeoutId)
+      cancelAnimationFrame(rafId)
     }
-  }, [flyToTarget, onFlyToComplete, pointsLayerReady])
+  }, [flyToTarget, pointsLayerReady])
 
   // Add points source + layer after style loads (style.load or load so we catch when map is ready)
   useEffect(() => {

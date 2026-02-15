@@ -15,8 +15,8 @@ export const config = {
   /** OpenAI API key – used for generating emergency call dialog (GPT-4) and optional TTS. */
   openai: {
     apiKey: process.env.OPENAI_API_KEY || '',
-    /** TTS model: tts-1 (fast, cheap), tts-1-hd (quality), or gpt-4o-mini-tts (supports instructions for more emotion). */
-    ttsModel: process.env.OPENAI_TTS_MODEL || 'gpt-4o-mini-tts',
+    /** TTS model: gpt-4o-mini-tts-2025-03-20 (pinned for natural pacing), or override with OPENAI_TTS_MODEL. */
+    ttsModel: process.env.OPENAI_TTS_MODEL || 'gpt-4o-mini-tts-2025-03-20',
   },
 
   /** TTS provider: "openai" (default) or "elevenlabs". */
