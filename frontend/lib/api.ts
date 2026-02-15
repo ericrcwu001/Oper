@@ -268,19 +268,34 @@ export interface AssessCallTranscriptResponse {
   stage?: "preliminary" | "confirming" | "confirmed"
   /** Rationales that matched on the latest segment only (changes every response). */
   latestTrigger?: { rationale: string; severity: string }[]
+  /** Live resource snapshot used in the LLM prompt (if any). */
+  resourceContextUsed?: string
+  /** Vehicle IDs closest + available for the incident (for map highlighting). */
+  closestVehicleIds?: string[]
+  /** One vehicle id per type for list-click zoom (closest ambulance, police, fire). */
+  closestVehicleByType?: {
+    ambulance?: string | null
+    police?: string | null
+    fire?: string | null
+  }
 }
 
 /**
  * Get dispatch recommendations from caller transcript (used during simulation).
  * POST /api/call-evaluation/assess
+ * Pass incidentLocation so backend can rank closest available units and return closestVehicleIds.
  */
 export async function assessCallTranscript(
-  transcript: string
+  transcript: string,
+  options?: { incidentLocation?: { lat: number; lng: number } }
 ): Promise<AssessCallTranscriptResponse> {
   const res = await fetch(`${API_BASE}/api/call-evaluation/assess`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ transcript }),
+    body: JSON.stringify({
+      transcript,
+      ...(options?.incidentLocation && { incidentLocation: options.incidentLocation }),
+    }),
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))
@@ -289,6 +304,37 @@ export async function assessCallTranscript(
     )
   }
   return res.json() as Promise<AssessCallTranscriptResponse>
+}
+
+/** Response from GET /api/call-evaluation/closest (no LLM; for live map highlighting and list-click zoom). */
+export interface ClosestVehiclesResponse {
+  closestVehicleIds: string[]
+  closestVehicleByType?: {
+    ambulance?: string | null
+    police?: string | null
+    fire?: string | null
+  }
+}
+
+/**
+ * Get closest available vehicle IDs for an incident location (no LLM).
+ * GET /api/call-evaluation/closest?lat=...&lng=...
+ * Use for live-updating map highlights as vehicles move.
+ */
+export async function fetchClosestVehicles(incidentLocation: {
+  lat: number
+  lng: number
+}): Promise<ClosestVehiclesResponse> {
+  const params = new URLSearchParams({
+    lat: String(incidentLocation.lat),
+    lng: String(incidentLocation.lng),
+  })
+  const res = await fetch(`${API_BASE}/api/call-evaluation/closest?${params}`)
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error((err as { error?: string }).error ?? "Closest vehicles failed")
+  }
+  return res.json() as Promise<ClosestVehiclesResponse>
 }
 
 /** One crime from GET /api/crimes (SF CSV, time-ordered for 3x sim). */

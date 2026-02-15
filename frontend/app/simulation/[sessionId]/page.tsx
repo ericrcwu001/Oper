@@ -34,6 +34,7 @@ import {
   interact,
   interactWithVoice,
   assessCallTranscript,
+  fetchClosestVehicles,
   fetchCrimesDay,
   fetchVehicles,
   postCrimesForSteering,
@@ -71,6 +72,22 @@ const DEFAULT_911_POINT: MapPoint = {
   callerId: "CALL-001",
   callerName: "Jane Doe",
   timestamp: "14:32",
+}
+
+/** Map LLM unit type to simulation vehicle type for list-click zoom. */
+function unitTypeToSimType(unit: string): "ambulance" | "police" | "fire" | null {
+  switch (unit) {
+    case "EMT_BLS":
+    case "ALS":
+      return "ambulance"
+    case "Police":
+    case "SWAT":
+      return "police"
+    case "Fire":
+      return "fire"
+    default:
+      return null
+  }
 }
 
 /** Initial map points. Optional override911 uses scenario-generated SF location for the 911 call. */
@@ -317,8 +334,21 @@ export default function LiveSimulationPage({
     suggestedCount?: number
     stage?: "preliminary" | "confirming" | "confirmed"
     latestTrigger?: { rationale: string; severity: string }[]
+    resourceContextUsed?: string
+    closestVehicleIds?: string[]
+    closestVehicleByType?: { ambulance?: string | null; police?: string | null; fire?: string | null }
   } | null>(null)
   const [isAssessingDispatch, setIsAssessingDispatch] = useState(false)
+  /** Closest-available vehicle IDs for map highlight; updated by assess + polling so highlights stay live. */
+  const [highlightedVehicleIds, setHighlightedVehicleIds] = useState<string[]>([])
+  /** When set, map flies to this point (e.g. after clicking a dispatch list item). */
+  const [mapFlyToTarget, setMapFlyToTarget] = useState<{ lat: number; lng: number } | null>(null)
+  /** Closest vehicle id per type (from assess + poll) for list-click zoom. */
+  const [closestVehicleByType, setClosestVehicleByType] = useState<{
+    ambulance?: string | null
+    police?: string | null
+    fire?: string | null
+  } | null>(null)
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const tick30Ref = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -368,6 +398,12 @@ export default function LiveSimulationPage({
       }))
   }, [crimesFromApi, crimeSimSeconds, crimeResolvedIds, crimePopScales])
   crimePointsRef.current = crimeMapPoints
+
+  // Mark closest-available (recommended) vehicles for map highlight; source: assess response + polling
+  const mapPointsWithRecommended = useMemo(() => {
+    const ids = new Set(highlightedVehicleIds)
+    return mapPoints.map((p) => ({ ...p, recommended: ids.has(p.id) }))
+  }, [mapPoints, highlightedVehicleIds])
 
   // When new crimes appear, set pop scale for pop-in effect
   useEffect(() => {
@@ -545,12 +581,16 @@ export default function LiveSimulationPage({
       setIsAssessingDispatch(false)
       return
     }
+    const incidentLocation =
+      scenarioCallLocation ?? { lat: DEFAULT_911_POINT.lat, lng: DEFAULT_911_POINT.lng }
     let cancelled = false
     setIsAssessingDispatch(true)
-    assessCallTranscript(callerTranscript)
+    assessCallTranscript(callerTranscript, { incidentLocation })
       .then((res) => {
         if (!cancelled) {
           setDispatchRecommendation(res)
+          setHighlightedVehicleIds(res.closestVehicleIds ?? [])
+          if (res.closestVehicleByType) setClosestVehicleByType(res.closestVehicleByType)
           setIsAssessingDispatch(false)
         }
       })
@@ -561,7 +601,30 @@ export default function LiveSimulationPage({
         }
       })
     return () => { cancelled = true }
-  }, [callActive, conversationHistory])
+  }, [callActive, conversationHistory, scenarioCallLocation])
+
+  // Poll closest-available vehicles every 2s while call is active so map highlight updates as positions/availability change
+  useEffect(() => {
+    if (!callActive) {
+      setHighlightedVehicleIds([])
+      setClosestVehicleByType(null)
+      return
+    }
+    const incidentLocation =
+      scenarioCallLocation ?? { lat: DEFAULT_911_POINT.lat, lng: DEFAULT_911_POINT.lng }
+    const poll = async () => {
+      try {
+        const res = await fetchClosestVehicles(incidentLocation)
+        setHighlightedVehicleIds(res.closestVehicleIds)
+        if (res.closestVehicleByType) setClosestVehicleByType(res.closestVehicleByType)
+      } catch {
+        // Keep previous highlights on error
+      }
+    }
+    poll()
+    const interval = setInterval(poll, 2000)
+    return () => clearInterval(interval)
+  }, [callActive, scenarioCallLocation])
 
   // Hint system
   const hintActions =
@@ -634,6 +697,8 @@ export default function LiveSimulationPage({
     setCallerAudioUrl(null)
     setConversationHistory([])
     setDispatchRecommendation(null)
+    setHighlightedVehicleIds([])
+    setClosestVehicleByType(null)
     try {
       sessionStorage.setItem(
         `simulation-transcript-${sessionId}`,
@@ -832,7 +897,7 @@ export default function LiveSimulationPage({
 
   return (
     <AppShell>
-      <div className="flex h-[calc(100vh-3.5rem)] flex-col px-4 lg:px-6">
+      <div className="flex h-screen flex-col pl-14 pr-4 lg:pl-16 lg:pr-6">
         {/* Compact header */}
         <div className="flex shrink-0 items-center justify-between gap-4 border-b py-3">
           <div className="flex min-w-0 items-center gap-3">
@@ -913,9 +978,11 @@ export default function LiveSimulationPage({
             <Card className="flex min-h-0 flex-1 flex-col overflow-hidden border bg-card">
               <div className="relative min-h-0 flex-1 w-full">
                 <SFMap
-                  points={mapPoints}
+                  points={mapPointsWithRecommended}
                   selectedPointId={selectedPointId}
                   onSelectPoint={setSelectedPointId}
+                  flyToTarget={mapFlyToTarget}
+                  onFlyToComplete={() => setMapFlyToTarget(null)}
                   className="absolute inset-0 h-full w-full"
                 />
                 <div className="absolute bottom-3 left-3 z-10 flex flex-wrap gap-4 rounded-md border border-border/80 bg-card/95 px-3 py-2 text-xs shadow-sm backdrop-blur">
@@ -938,6 +1005,10 @@ export default function LiveSimulationPage({
                   <span className="flex items-center gap-1.5">
                     <span className="h-2.5 w-2.5 rounded-full bg-[#FCD34D]" aria-hidden />
                     Crime
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2.5 w-2.5 rounded-full border-2 border-[#E879F9] bg-transparent" aria-hidden />
+                    Closest available
                   </span>
                   {crimesDate && (
                     <span className="text-muted-foreground">Day: {crimesDate} ({CRIME_SIM_CLOCK_SPEEDUP}×)</span>
@@ -1099,14 +1170,38 @@ export default function LiveSimulationPage({
                       </span>
                     </p>
                     <ul className="list-inside list-disc space-y-1 text-xs">
-                      {dispatchRecommendation.units.map((u, i) => (
-                        <li key={i}>
-                          <span className="font-medium">{u.unit}</span>
-                          {u.rationale && (
-                            <span className="text-muted-foreground"> — {u.rationale}</span>
-                          )}
-                        </li>
-                      ))}
+                      {dispatchRecommendation.units.map((u, i) => {
+                        const vehicleId = (() => {
+                          const simType = unitTypeToSimType(u.unit)
+                          if (!simType) return null
+                          return (closestVehicleByType ?? dispatchRecommendation.closestVehicleByType)?.[simType] ?? null
+                        })()
+                        const point = vehicleId ? mapPoints.find((p) => p.id === vehicleId) : null
+                        const canZoom = Boolean(point)
+                        return (
+                          <li key={i}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (point) {
+                                  setMapFlyToTarget({ lat: point.lat, lng: point.lng })
+                                  setSelectedPointId(vehicleId)
+                                }
+                              }}
+                              disabled={!canZoom}
+                              className={cn(
+                                "text-left hover:underline focus:outline-none focus:underline disabled:no-underline disabled:cursor-default",
+                                canZoom && "cursor-pointer"
+                              )}
+                            >
+                              <span className="font-medium">{u.unit}</span>
+                              {u.rationale && (
+                                <span className="text-muted-foreground"> — {u.rationale}</span>
+                              )}
+                            </button>
+                          </li>
+                        )
+                      })}
                     </ul>
                   </div>
                 )}

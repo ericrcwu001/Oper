@@ -19,6 +19,11 @@ import {
   MAP_POINT_911_BEACON_COLOR,
   MAP_POINT_CRIME_BEACON_HEIGHT_M,
   MAP_POINT_CRIME_BEACON_COLOR,
+  MAP_POINT_CRIME_BEACON_FOOTPRINT,
+  MAP_POINT_911_STROKE_COLOR,
+  CRIME_POINT_STROKE_COLOR,
+  MAP_POINT_RECOMMENDED_STROKE_COLOR,
+  MAP_POINT_RECOMMENDED_RING_RADIUS_BY_ZOOM,
 } from "@/lib/map-constants"
 import { getSFMapStyle } from "@/lib/map-style"
 
@@ -43,6 +48,8 @@ function pointsToGeoJSON(points: MapPoint[]): GeoJSON.FeatureCollection {
         selected: p.selected ?? false,
         disabled: p.disabled ?? false,
         radiusScale: p.radiusScale ?? 1,
+        recommended: p.recommended ?? false,
+        status: p.status === 1 || p.status === true,
       },
     })),
   }
@@ -143,6 +150,7 @@ function pointsToEllipseGeoJSON(
         type: p.type,
         selected: selected,
         disabled: p.disabled ?? false,
+        status: p.status === 1 || p.status === true,
       },
     }
   })
@@ -188,6 +196,7 @@ const POINTS_LAYER_SELECTED_ID = "map-points-circles-selected"
 const POINTS_LAYER_SELECTED_UNIT_ID = "map-points-circles-selected-unit"
 const POINTS_LAYER_911_ID = "map-points-circles-911"
 const POINTS_LAYER_SELECTED_911_ID = "map-points-circles-selected-911"
+const POINTS_LAYER_RECOMMENDED_ID = "map-points-circles-recommended"
 const POINTS_911_BEACONS_SOURCE_ID = "map-points-911-beacons"
 const POINTS_911_BEACON_LAYER_ID = "map-points-911-beacon-extrusion"
 const POINTS_CRIME_BEACONS_SOURCE_ID = "map-points-crime-beacons"
@@ -201,6 +210,9 @@ const POINTS_ELLIPSE_LAYER_SELECTED_UNIT_ID = "map-points-ellipses-fill-selected
 const POINTS_ELLIPSE_LAYER_911_ID = "map-points-ellipses-fill-911"
 const POINTS_ELLIPSE_LAYER_SELECTED_911_ID = "map-points-ellipses-fill-selected-911"
 const PITCH_ELLIPSE_THRESHOLD_DEG = 5
+/** Hysteresis: use ellipses above this pitch, use circles below PITCH_USE_CIRCLE_DEG. Avoids flicker at threshold. */
+const PITCH_USE_ELLIPSE_DEG = 8
+const PITCH_USE_CIRCLE_DEG = 3
 
 const FILTER_UNIT: maplibregl.FilterSpecification = [
   "any",
@@ -218,6 +230,9 @@ export interface SFMapProps {
   defaultCenter?: [number, number]
   defaultZoom?: number
   className?: string
+  /** When set, map flies to this point then onFlyToComplete is called. */
+  flyToTarget?: { lat: number; lng: number } | null
+  onFlyToComplete?: () => void
 }
 
 export function SFMap({
@@ -227,6 +242,8 @@ export function SFMap({
   defaultCenter = SF_DEFAULT_CENTER,
   defaultZoom = SF_DEFAULT_ZOOM,
   className,
+  flyToTarget = null,
+  onFlyToComplete,
 }: SFMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
@@ -234,7 +251,13 @@ export function SFMap({
   const pointsRef = useRef<MapPoint[]>(points)
   const selectedPointIdRef = useRef<string | null>(selectedPointId)
   const pitchRef = useRef<number>(0)
+  const useEllipseModeRef = useRef<boolean>(false)
+  const lastFlyToRef = useRef<{ lat: number; lng: number } | null>(null)
   const [pointsLayerReady, setPointsLayerReady] = useState(false)
+  const [pointsVersion, setPointsVersion] = useState(0)
+  if (pointsRef.current !== points) {
+    setPointsVersion((v) => v + 1)
+  }
   pointsRef.current = points
   selectedPointIdRef.current = selectedPointId
 
@@ -270,6 +293,28 @@ export function SFMap({
       mapRef.current = null
     }
   }, [defaultCenter, defaultZoom])
+
+  // Fly to target when flyToTarget is set (e.g. from dispatch list click). Re-run when map becomes ready so early clicks still fly.
+  useEffect(() => {
+    if (!flyToTarget) return
+    const map = mapRef.current
+    if (!map) return
+    const prev = lastFlyToRef.current
+    if (prev && prev.lat === flyToTarget.lat && prev.lng === flyToTarget.lng) return
+    lastFlyToRef.current = flyToTarget
+    map.flyTo(
+      { center: [flyToTarget.lng, flyToTarget.lat], zoom: 14 },
+      { duration: 800 }
+    )
+    const onComplete = () => {
+      lastFlyToRef.current = null
+      onFlyToComplete?.()
+    }
+    map.once("moveend", onComplete)
+    return () => {
+      map.off("moveend", onComplete)
+    }
+  }, [flyToTarget, onFlyToComplete, pointsLayerReady])
 
   // Add points source + layer after style loads (style.load or load so we catch when map is ready)
   useEffect(() => {
@@ -321,7 +366,7 @@ export function SFMap({
           "case",
           ["==", ["get", "type"], "911"],
           0,
-          ["case", ["==", ["get", "type"], "crime"], 0, 1.8],
+          ["case", ["==", ["get", "type"], "crime"], 0, ["case", ["==", ["get", "status"], true], 0.8, 2.5]],
         ],
         "circle-stroke-color": [
           "case",
@@ -329,7 +374,14 @@ export function SFMap({
           "transparent",
           ["case", ["==", ["get", "type"], "crime"], "transparent", MAP_POINT_OUTLINE_COLOR],
         ],
-        "circle-opacity": ["case", ["get", "disabled"], 0.4, 0.98],
+        "circle-opacity": [
+          "case",
+          ["get", "disabled"],
+          0.4,
+          ["all", ["in", ["get", "type"], ["literal", ["police", "fire", "ambulance"]]], ["==", ["get", "status"], true]],
+          0.35,
+          0.98,
+        ],
       }
 
       type CirclePaint = maplibregl.CircleLayerSpecification["paint"]
@@ -414,6 +466,27 @@ export function SFMap({
         } as CirclePaint,
       })
 
+      // Recommended (closest available) units: highlight ring on top of units
+      const flatRecommendedRadius = MAP_POINT_RECOMMENDED_RING_RADIUS_BY_ZOOM.flat()
+      const filterRecommendedUnit = [
+        "all",
+        FILTER_UNIT,
+        ["get", "recommended"],
+      ] as maplibregl.FilterSpecification
+      map.addLayer({
+        id: POINTS_LAYER_RECOMMENDED_ID,
+        type: "circle",
+        source: POINTS_SOURCE_ID,
+        filter: filterRecommendedUnit,
+        paint: {
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], ...flatRecommendedRadius],
+          "circle-color": "rgba(0,0,0,0)",
+          "circle-stroke-width": 3,
+          "circle-stroke-color": MAP_POINT_RECOMMENDED_STROKE_COLOR,
+          "circle-opacity": 1,
+        } as CirclePaint,
+      })
+
       // Ellipse (oval) layers for 3D perspective — shown when pitch > threshold
       const pitch = map.getPitch()
       map.addSource(POINTS_ELLIPSE_SOURCE_ID, {
@@ -477,13 +550,16 @@ export function SFMap({
         layout: { visibility: ellipseVisibility },
       })
 
-      // Keep circles visible when flat, hidden when pitched
+      // Keep circles visible when flat, hidden when pitched. Recommended (closest-available) ring stays visible in 3D.
       map.setLayoutProperty(POINTS_LAYER_ID, "visibility", circleVisibility)
       map.setLayoutProperty(POINTS_LAYER_UNIT_ID, "visibility", circleVisibility)
       map.setLayoutProperty(POINTS_LAYER_SELECTED_ID, "visibility", circleVisibility)
       map.setLayoutProperty(POINTS_LAYER_SELECTED_UNIT_ID, "visibility", circleVisibility)
       map.setLayoutProperty(POINTS_LAYER_911_ID, "visibility", circleVisibility)
       map.setLayoutProperty(POINTS_LAYER_SELECTED_911_ID, "visibility", circleVisibility)
+      if (map.getLayer(POINTS_LAYER_RECOMMENDED_ID)) {
+        map.setLayoutProperty(POINTS_LAYER_RECOMMENDED_ID, "visibility", pitch > PITCH_ELLIPSE_THRESHOLD_DEG ? "visible" : circleVisibility)
+      }
 
       setPointsLayerReady(true)
 
@@ -543,7 +619,8 @@ export function SFMap({
     }
   }, [])
 
-  // Sync points and selected state to GeoJSON source; sync 911 and crime beacon polygons
+  // Sync points and selected state to GeoJSON source; sync 911 and crime beacon polygons.
+  // Dependencies are fixed-length (pointsVersion, selectedPointId) to satisfy React's constant dependency array size.
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
@@ -551,9 +628,11 @@ export function SFMap({
     const source = map.getSource(POINTS_SOURCE_ID) as maplibregl.GeoJSONSource
     if (!source) return
 
-    const withSelection = points.map((p) => ({
+    const pts = pointsRef.current
+    const selId = selectedPointIdRef.current
+    const withSelection = pts.map((p) => ({
       ...p,
-      selected: p.id === selectedPointId,
+      selected: p.id === selId,
     }))
     source.setData(pointsToGeoJSON(withSelection))
 
@@ -561,15 +640,15 @@ export function SFMap({
     const r = radiusAtZoom(CRIME_POINT_RADIUS_BY_ZOOM, zoom)
 
     const beaconSource = map.getSource(POINTS_911_BEACONS_SOURCE_ID) as maplibregl.GeoJSONSource
-    if (beaconSource) beaconSource.setData(points911ToBeaconGeoJSON(points, zoom, r))
+    if (beaconSource) beaconSource.setData(points911ToBeaconGeoJSON(pts, zoom, r))
     const crimeBeaconSource = map.getSource(POINTS_CRIME_BEACONS_SOURCE_ID) as maplibregl.GeoJSONSource
-    if (crimeBeaconSource) crimeBeaconSource.setData(pointsCrimeToBeaconGeoJSON(points, zoom, r))
+    if (crimeBeaconSource) crimeBeaconSource.setData(pointsCrimeToBeaconGeoJSON(pts, zoom, r))
 
     if (pitchRef.current > PITCH_ELLIPSE_THRESHOLD_DEG) {
       const ellipseSource = map.getSource(POINTS_ELLIPSE_SOURCE_ID) as maplibregl.GeoJSONSource
-      if (ellipseSource) ellipseSource.setData(pointsToEllipseGeoJSON(points, zoom, pitchRef.current, selectedPointId))
+      if (ellipseSource) ellipseSource.setData(pointsToEllipseGeoJSON(pts, zoom, pitchRef.current, selId))
     }
-  }, [points, selectedPointId])
+  }, [pointsVersion, selectedPointId])
 
   // Refresh beacon footprint when zoom or center changes so it matches circle radius
   useEffect(() => {
@@ -597,26 +676,15 @@ export function SFMap({
     }
   }, [pointsLayerReady])
 
-  // When pitch/zoom changes: update ellipse data and switch circle vs ellipse visibility (3D = ovals)
+  // When pitch/zoom changes: update ellipse data and switch circle vs ellipse visibility (3D = ovals).
+  // Hysteresis prevents flicker when pitch hovers near the threshold; ellipse setData only on moveend/pitchend to keep unavailable styling stable during drag.
   useEffect(() => {
     const map = mapRef.current
     if (!map || !pointsLayerReady) return
 
-    const updatePitchAndEllipses = () => {
-      const pitch = map.getPitch()
-      pitchRef.current = pitch
-      const zoom = map.getZoom()
-      const pts = pointsRef.current ?? []
-      const sel = selectedPointIdRef.current ?? null
-      const ellipseSource = map.getSource(POINTS_ELLIPSE_SOURCE_ID) as maplibregl.GeoJSONSource
-      if (!ellipseSource) return
-
-      ellipseSource.setData(pointsToEllipseGeoJSON(pts, zoom, pitch, sel))
-
-      const useEllipses = pitch > PITCH_ELLIPSE_THRESHOLD_DEG
+    const applyVisibility = (useEllipses: boolean) => {
       const ellipseVis = useEllipses ? "visible" : "none"
       const circleVis = useEllipses ? "none" : "visible"
-
       for (const id of [
         POINTS_LAYER_ID,
         POINTS_LAYER_UNIT_ID,
@@ -626,6 +694,9 @@ export function SFMap({
         POINTS_LAYER_SELECTED_911_ID,
       ]) {
         if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", circleVis)
+      }
+      if (map.getLayer(POINTS_LAYER_RECOMMENDED_ID)) {
+        map.setLayoutProperty(POINTS_LAYER_RECOMMENDED_ID, "visibility", useEllipses ? "visible" : circleVis)
       }
       for (const id of [
         POINTS_ELLIPSE_LAYER_ID,
@@ -639,12 +710,33 @@ export function SFMap({
       }
     }
 
-    map.on("move", updatePitchAndEllipses)
+    const updateVisibilityOnly = () => {
+      const pitch = map.getPitch()
+      pitchRef.current = pitch
+      if (pitch > PITCH_USE_ELLIPSE_DEG) useEllipseModeRef.current = true
+      else if (pitch < PITCH_USE_CIRCLE_DEG) useEllipseModeRef.current = false
+      applyVisibility(useEllipseModeRef.current)
+    }
+
+    const updatePitchAndEllipses = () => {
+      const pitch = map.getPitch()
+      pitchRef.current = pitch
+      const zoom = map.getZoom()
+      const pts = pointsRef.current ?? []
+      const sel = selectedPointIdRef.current ?? null
+      const ellipseSource = map.getSource(POINTS_ELLIPSE_SOURCE_ID) as maplibregl.GeoJSONSource
+      if (ellipseSource) ellipseSource.setData(pointsToEllipseGeoJSON(pts, zoom, pitch, sel))
+      if (pitch > PITCH_USE_ELLIPSE_DEG) useEllipseModeRef.current = true
+      else if (pitch < PITCH_USE_CIRCLE_DEG) useEllipseModeRef.current = false
+      applyVisibility(useEllipseModeRef.current)
+    }
+
+    map.on("move", updateVisibilityOnly)
     map.on("moveend", updatePitchAndEllipses)
     map.on("pitchend", updatePitchAndEllipses)
     updatePitchAndEllipses()
     return () => {
-      map.off("move", updatePitchAndEllipses)
+      map.off("move", updateVisibilityOnly)
       map.off("moveend", updatePitchAndEllipses)
       map.off("pitchend", updatePitchAndEllipses)
     }
@@ -697,9 +789,9 @@ export function SFMap({
                 value:
                   typeof point.status === "string"
                     ? point.status
-                    : point.status === true
+                    : point.status === 1 || point.status === true
                       ? "En route"
-                      : point.status === false
+                      : point.status === 0 || point.status === false
                         ? "Idle"
                         : "Unknown",
               },
@@ -772,7 +864,8 @@ export function SFMap({
 
       onSelectPoint(id)
 
-      const point = points.find((p) => p.id === id)
+      const pts = pointsRef.current
+      const point = pts.find((p) => p.id === id)
       if (point) showPopup(point, [point.lng, point.lat])
     }
 
@@ -780,7 +873,7 @@ export function SFMap({
     return () => {
       map.off("click", handleClick)
     }
-  }, [pointsLayerReady, points, onSelectPoint, showPopup])
+  }, [pointsLayerReady, pointsVersion, onSelectPoint, showPopup])
 
   // Cursor on hover (only after points layer exists)
   useEffect(() => {

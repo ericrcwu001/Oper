@@ -72,14 +72,18 @@ function getStageFromTranscriptLength(transcript) {
 /**
  * Call LLM to analyze caller transcript and return dispatch recommendations.
  * Uses RAG (ragDocs) to ground recommendations in 911 protocols.
+ * Optionally includes a live resource snapshot (closest available units + ETA).
  *
  * @param {string} transcript - Full caller-side transcript from the live call.
- * @returns {Promise<{ units: Array<{ unit: string, rationale?: string, severity?: string }>, severity: string, critical?: boolean, suggestedCount?: number, stage?: string, latestTrigger?: Array<{ rationale: string, severity: string }> }>}
+ * @param {{ resourceSummary?: string }} [options] - Optional. resourceSummary: closest-available units and ETAs for the LLM.
+ * @returns {Promise<{ units: Array<{ unit: string, rationale?: string, severity?: string }>, severity: string, critical?: boolean, suggestedCount?: number, stage?: string, latestTrigger?: Array<{ rationale: string, severity: string }>, resourceContextUsed?: string }>}
  */
-export async function assessTranscriptWithLLM(transcript) {
+export async function assessTranscriptWithLLM(transcript, options = {}) {
   if (!config.openai?.apiKey) {
     throw new Error('OPENAI_API_KEY is not set. Live evaluation requires an API key.');
   }
+
+  const resourceSummary = typeof options.resourceSummary === 'string' ? options.resourceSummary : '';
 
   const text = (transcript || '').trim();
   let ragContext = '';
@@ -114,7 +118,11 @@ Rules:
 - suggestedCount: optional; only include if the caller indicated number of victims/patients (e.g. "two people down" -> 2).
 - latestTrigger: 0-3 items summarizing what in the caller's most recent statements (last sentence or two) drove the recommendation; use this so the UI can show "Just in" updates.`;
 
-  const userPrompt = `CALLER TRANSCRIPT (operator has been speaking with this person; analyze for dispatch):\n\n${text || '(No transcript yet.)'}\n\nReturn the JSON object only.`;
+  let userPrompt = `CALLER TRANSCRIPT (operator has been speaking with this person; analyze for dispatch):\n\n${text || '(No transcript yet.)'}`;
+  if (resourceSummary) {
+    userPrompt += `\n\nLIVE RESOURCE SNAPSHOT (closest available units by distance and ETA):\n${resourceSummary}\n\nUse this to recommend specific units when appropriate and to state who is closest / ETA.`;
+  }
+  userPrompt += '\n\nReturn the JSON object only.';
 
   const completion = await openai.chat.completions.create({
     model: 'gpt-4o-mini',
@@ -139,5 +147,6 @@ Rules:
   const stage = getStageFromTranscriptLength(transcript);
   const out = normalizeResponse(parsed, transcript);
   if (!out.stage) out.stage = stage;
+  if (resourceSummary) out.resourceContextUsed = resourceSummary;
   return out;
 }
