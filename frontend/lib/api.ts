@@ -306,9 +306,14 @@ export async function assessCallTranscript(
   return res.json() as Promise<AssessCallTranscriptResponse>
 }
 
-/** Response from GET /api/call-evaluation/closest (no LLM; for live map highlighting). */
+/** Response from GET /api/call-evaluation/closest (no LLM; for live map highlighting and list-click zoom). */
 export interface ClosestVehiclesResponse {
   closestVehicleIds: string[]
+  closestVehicleByType?: {
+    ambulance?: string | null
+    police?: string | null
+    fire?: string | null
+  }
 }
 
 /**

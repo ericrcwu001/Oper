@@ -26,7 +26,10 @@ const VEHICLE_TYPES = ['ambulance', 'police', 'fire'];
  */
 export function rankByProximityAndETA(incidentLatLng, vehicles) {
   const incident = [incidentLatLng.lat, incidentLatLng.lng];
-  const available = (vehicles || []).filter((v) => v && typeof v.lat === 'number' && typeof v.lng === 'number' && v.status === false);
+  // Idle = available: backend uses 0/1 (0=idle, 1=en route) or boolean false/true
+  const available = (vehicles || []).filter(
+    (v) => v && typeof v.lat === 'number' && typeof v.lng === 'number' && (v.status === false || v.status === 0)
+  );
   const withDistance = available.map((v) => {
     const distanceM = haversineMeters(incident, [v.lat, v.lng]);
     const speed = SPEED_AVG[v.type] || 11;

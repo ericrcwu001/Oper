@@ -290,7 +290,7 @@ export function SFMap({
     }
   }, [defaultCenter, defaultZoom])
 
-  // Fly to target when flyToTarget is set (e.g. from dispatch list click)
+  // Fly to target when flyToTarget is set (e.g. from dispatch list click). Re-run when map becomes ready so early clicks still fly.
   useEffect(() => {
     if (!flyToTarget) return
     const map = mapRef.current
@@ -310,7 +310,7 @@ export function SFMap({
     return () => {
       map.off("moveend", onComplete)
     }
-  }, [flyToTarget, onFlyToComplete])
+  }, [flyToTarget, onFlyToComplete, pointsLayerReady])
 
   // Add points source + layer after style loads (style.load or load so we catch when map is ready)
   useEffect(() => {

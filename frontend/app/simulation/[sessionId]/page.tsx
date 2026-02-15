@@ -343,6 +343,12 @@ export default function LiveSimulationPage({
   const [highlightedVehicleIds, setHighlightedVehicleIds] = useState<string[]>([])
   /** When set, map flies to this point (e.g. after clicking a dispatch list item). */
   const [mapFlyToTarget, setMapFlyToTarget] = useState<{ lat: number; lng: number } | null>(null)
+  /** Closest vehicle id per type (from assess + poll) for list-click zoom. */
+  const [closestVehicleByType, setClosestVehicleByType] = useState<{
+    ambulance?: string | null
+    police?: string | null
+    fire?: string | null
+  } | null>(null)
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const tick30Ref = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -584,6 +590,7 @@ export default function LiveSimulationPage({
         if (!cancelled) {
           setDispatchRecommendation(res)
           setHighlightedVehicleIds(res.closestVehicleIds ?? [])
+          if (res.closestVehicleByType) setClosestVehicleByType(res.closestVehicleByType)
           setIsAssessingDispatch(false)
         }
       })
@@ -600,6 +607,7 @@ export default function LiveSimulationPage({
   useEffect(() => {
     if (!callActive) {
       setHighlightedVehicleIds([])
+      setClosestVehicleByType(null)
       return
     }
     const incidentLocation =
@@ -608,6 +616,7 @@ export default function LiveSimulationPage({
       try {
         const res = await fetchClosestVehicles(incidentLocation)
         setHighlightedVehicleIds(res.closestVehicleIds)
+        if (res.closestVehicleByType) setClosestVehicleByType(res.closestVehicleByType)
       } catch {
         // Keep previous highlights on error
       }
@@ -689,6 +698,7 @@ export default function LiveSimulationPage({
     setConversationHistory([])
     setDispatchRecommendation(null)
     setHighlightedVehicleIds([])
+    setClosestVehicleByType(null)
     try {
       sessionStorage.setItem(
         `simulation-transcript-${sessionId}`,
@@ -1164,7 +1174,7 @@ export default function LiveSimulationPage({
                         const vehicleId = (() => {
                           const simType = unitTypeToSimType(u.unit)
                           if (!simType) return null
-                          return dispatchRecommendation.closestVehicleByType?.[simType] ?? null
+                          return (closestVehicleByType ?? dispatchRecommendation.closestVehicleByType)?.[simType] ?? null
                         })()
                         const point = vehicleId ? mapPoints.find((p) => p.id === vehicleId) : null
                         const canZoom = Boolean(point)
