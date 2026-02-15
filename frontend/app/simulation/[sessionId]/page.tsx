@@ -1650,7 +1650,7 @@ export default function LiveSimulationPage({
 
             {/* Bottom half: split — Dispatch | Notes; same height as transcript (half and half); panels scroll */}
             <div className="flex min-h-0 flex-1 flex-col gap-2 lg:flex-row">
-              <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto lg:max-w-[55%]">
+              <div className="scrollbar-dark flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto lg:max-w-[55%]">
                 {/* Dispatch recommendations */}
             <Card
               className={cn(

@@ -162,4 +162,22 @@
   .difficulty-tint-hard {
     background-color: rgba(239, 68, 68, 0.18);
   }
+  /* Dark scrollbar for dispatch recommendations panel — blends with theme */
+  .scrollbar-dark {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(222 12% 20%) transparent;
+  }
+  .scrollbar-dark::-webkit-scrollbar {
+    width: 6px;
+  }
+  .scrollbar-dark::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-dark::-webkit-scrollbar-thumb {
+    background-color: hsl(222 12% 20%);
+    border-radius: 3px;
+  }
+  .scrollbar-dark::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(222 12% 28%);
+  }
 }
