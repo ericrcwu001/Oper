@@ -21,6 +21,8 @@ import {
   MAP_POINT_CRIME_BEACON_HEIGHT_M,
   MAP_POINT_CRIME_BEACON_COLOR,
   MAP_POINT_CRIME_BEACON_FOOTPRINT,
+  MAP_POINT_911_STROKE_COLOR,
+  CRIME_POINT_STROKE_COLOR,
 } from "@/lib/map-constants"
 import { getSFMapStyle } from "@/lib/map-style"
 
@@ -186,10 +188,10 @@ export function SFMap({
     const addPointsLayer = () => {
       if (map.getSource(POINTS_SOURCE_ID)) return
 
-      // Units (police/fire/ambulance): smaller radii from HEAD
+      // Units (police/fire/ambulance): smaller radii
       const flatRadiusUnit = MAP_POINT_RADIUS_UNIT_BY_ZOOM.flat()
       const flatRadiusUnitSelected = MAP_POINT_RADIUS_UNIT_SELECTED_BY_ZOOM.flat()
-      // Crime and 911: same size from main (CRIME_POINT_RADIUS_BY_ZOOM)
+      // Crime and 911: same size (CRIME_POINT_RADIUS_BY_ZOOM)
       const flatCrimeRadius = CRIME_POINT_RADIUS_BY_ZOOM.flat()
       const flatCrimeRadiusSelected = MAP_POINT_RADIUS_SELECTED_BY_ZOOM.map(
         ([z, r]) => [z, r * 2]
@@ -224,12 +226,17 @@ export function SFMap({
             "#9ca3af",
           ],
         ],
-        "circle-stroke-width": ["case", ["==", ["get", "type"], "crime"], 0, 1.8],
+        "circle-stroke-width": [
+          "case",
+          ["==", ["get", "type"], "911"],
+          3,
+          ["case", ["==", ["get", "type"], "crime"], 2.5, 1.8],
+        ],
         "circle-stroke-color": [
           "case",
-          ["==", ["get", "type"], "crime"],
-          "transparent",
-          MAP_POINT_OUTLINE_COLOR,
+          ["==", ["get", "type"], "911"],
+          MAP_POINT_911_STROKE_COLOR,
+          ["case", ["==", ["get", "type"], "crime"], CRIME_POINT_STROKE_COLOR, MAP_POINT_OUTLINE_COLOR],
         ],
         "circle-opacity": ["case", ["get", "disabled"], 0.4, 0.98],
       }

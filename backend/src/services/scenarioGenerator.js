@@ -82,7 +82,8 @@ const SYSTEM_PROMPT = `You are an AI 911 training assistant. Generate exactly ON
 
 Rules:
 - Realistic, grounded emergencies. No language-barrier scenarios (caller always speaks English). Use the scenario_type from the user message. Easy: fire, cardiac, accident, fall, choking, lost child, gas leak. Medium: domestic dispute, overdose, robbery, assault, mental health. Hard: shooting, domestic violence, barricaded, hostage, mass casualty, suicidal, hoax.
-- scenario: id, scenario_type, title, description (2-4 sentences), caller_profile (name, age, emotion, gender, race, other_relevant_details), critical_info (4-7 facts operator must get), expected_actions (4-7), optional_complications (1-3), difficulty, language "en".
+- Scenario is in San Francisco. Include in scenario a location: address (human-readable, e.g. "2500 Mission St, San Francisco"), lat (number 37.7–37.83), lng (number -122.52 to -122.35) so the incident can be shown on the SF map.
+- scenario: id, scenario_type, title, description (2-4 sentences), caller_profile (name, age, emotion, gender, race, other_relevant_details), critical_info (4-7 facts operator must get), expected_actions (4-7), optional_complications (1-3), difficulty, language "en", location: { address: "", lat: 37.77, lng: -122.42 }.
 - persona: stability 0-1 (lower=more emotional), style 0-1, speed ~1.0, voice_description (accent, age, gender, tone). Match difficulty: easy=calm/clear (0.7+ stability); medium=anxious (0.4-0.55); hard=panicked (0.15-0.35).
 - Voice-agent fields (match difficulty): role_instruction (one line "You are [name], [age], calling 911..."), scenario_summary_for_agent (2-4 sentences), withheld_information (0-4 items; details that surface when operator probes, e.g. suspect description), behavior_notes, dialogue_directions (how to speak: easy=clear; hard=fragmented, crying), response_behavior (when to give address/info), opening_line, do_not_say (stay in character).
 - timeline: Include 1-3 concrete, actionable events at 10/20/30/40s. Only things that happen in the scene that the operator can act on (e.g. person stops breathing, smoke appears, victim becomes unresponsive, second person found, roof caves in). Do NOT include caller behavior or emotion (forbidden: "caller becomes quieter", "caller starts crying", "caller gets more panicked", "caller goes silent"). Only concrete events and actionable information. Empty {} only when the situation has no developing scene.
@@ -91,7 +92,7 @@ Difficulty (exaggerate): Easy=calm, volunteers info. Medium=stressed, needs prom
 
 Output JSON (these keys only):
 {
-  "scenario": { "id": "", "scenario_type": "", "title": "", "description": "", "caller_profile": { "name": "", "age": 0, "emotion": "", "gender": "", "race": "", "other_relevant_details": "" }, "critical_info": [], "expected_actions": [], "optional_complications": [], "difficulty": "easy|medium|hard", "language": "en" },
+  "scenario": { "id": "", "scenario_type": "", "title": "", "description": "", "caller_profile": { "name": "", "age": 0, "emotion": "", "gender": "", "race": "", "other_relevant_details": "" }, "critical_info": [], "expected_actions": [], "optional_complications": [], "difficulty": "easy|medium|hard", "language": "en", "location": { "address": "e.g. 2500 Mission St, San Francisco", "lat": 37.77, "lng": -122.42 } },
   "persona": { "stability": 0.5, "style": 0.5, "speed": 1.0, "voice_description": "" },
   "role_instruction": "",
   "scenario_summary_for_agent": "",
@@ -161,6 +162,22 @@ export async function generateScenario(difficulty) {
   if (scenario.language !== 'en') {
     scenario.language = 'en';
   }
+
+  // SF map bounds: lat 37.7–37.83, lng -122.52 to -122.35
+  const SF_LAT_MIN = 37.7;
+  const SF_LAT_MAX = 37.83;
+  const SF_LNG_MIN = -122.52;
+  const SF_LNG_MAX = -122.35;
+  if (!scenario.location || typeof scenario.location !== 'object') {
+    scenario.location = { address: 'San Francisco, CA', lat: 37.7749, lng: -122.4194 };
+  }
+  const loc = scenario.location;
+  loc.lat = Math.max(SF_LAT_MIN, Math.min(SF_LAT_MAX, Number(loc.lat) || 37.7749));
+  loc.lng = Math.max(SF_LNG_MIN, Math.min(SF_LNG_MAX, Number(loc.lng) || -122.4194));
+  if (typeof loc.address !== 'string' || !loc.address.trim()) {
+    loc.address = 'San Francisco, CA';
+  }
+
   payload.scenario = scenario;
 
   // Ensure timeline exists: map of seconds (as string keys) -> event description
