@@ -277,7 +277,7 @@ export async function getNoteSuggestion(callerText) {
       {
         role: 'system',
         content:
-          'You are a 911 operator assistant. Given one statement from a 911 caller, output a very short note (a few words) ONLY if there is medically or situationally relevant information to log. Examples: "could be stroke", "chest pain", "unconscious", "multiple victims". If nothing relevant to log, output nothing. Output only the note or nothing, no explanation.',
+          'You are a 911 operator assistant. Given one statement from a 911 caller, output a very short note (a few words) ONLY if there is medically or situationally relevant information to log. Examples: "could be stroke", "chest pain", "unconscious", "multiple victims". If nothing relevant to log, leave your response completely empty—do not output the word "nothing" or "n/a" or any placeholder; output no text at all. When relevant, output only the note, no explanation.',
       },
       { role: 'user', content: `Caller said: ${text.slice(0, 500)}` },
     ],
@@ -285,5 +285,8 @@ export async function getNoteSuggestion(callerText) {
   });
 
   const raw = completion.choices[0]?.message?.content?.trim();
-  return raw ? raw.replace(/\n/g, ' ').slice(0, 80) : '';
+  if (!raw) return '';
+  const normalized = raw.replace(/\n/g, ' ').slice(0, 80);
+  const emptyLike = /^(nothing|n\/a|na|none|nope|no\s*)$/i;
+  return emptyLike.test(normalized) ? '' : normalized;
 }
