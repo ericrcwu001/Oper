@@ -509,14 +509,16 @@ export function SFMap({
         layout: { visibility: ellipseVisibility },
       })
 
-      // Keep circles visible when flat, hidden when pitched
+      // Keep circles visible when flat, hidden when pitched. Recommended (closest-available) ring stays visible in 3D.
       map.setLayoutProperty(POINTS_LAYER_ID, "visibility", circleVisibility)
       map.setLayoutProperty(POINTS_LAYER_UNIT_ID, "visibility", circleVisibility)
       map.setLayoutProperty(POINTS_LAYER_SELECTED_ID, "visibility", circleVisibility)
       map.setLayoutProperty(POINTS_LAYER_SELECTED_UNIT_ID, "visibility", circleVisibility)
       map.setLayoutProperty(POINTS_LAYER_911_ID, "visibility", circleVisibility)
       map.setLayoutProperty(POINTS_LAYER_SELECTED_911_ID, "visibility", circleVisibility)
-      if (map.getLayer(POINTS_LAYER_RECOMMENDED_ID)) map.setLayoutProperty(POINTS_LAYER_RECOMMENDED_ID, "visibility", circleVisibility)
+      if (map.getLayer(POINTS_LAYER_RECOMMENDED_ID)) {
+        map.setLayoutProperty(POINTS_LAYER_RECOMMENDED_ID, "visibility", pitch > PITCH_ELLIPSE_THRESHOLD_DEG ? "visible" : circleVisibility)
+      }
 
       setPointsLayerReady(true)
 
@@ -660,9 +662,12 @@ export function SFMap({
         POINTS_LAYER_SELECTED_UNIT_ID,
         POINTS_LAYER_911_ID,
         POINTS_LAYER_SELECTED_911_ID,
-        POINTS_LAYER_RECOMMENDED_ID,
       ]) {
         if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", circleVis)
+      }
+      // Recommended (closest-available) ring stays visible in 3D so highlighting is not lost when tilted
+      if (map.getLayer(POINTS_LAYER_RECOMMENDED_ID)) {
+        map.setLayoutProperty(POINTS_LAYER_RECOMMENDED_ID, "visibility", useEllipses ? "visible" : circleVis)
       }
       for (const id of [
         POINTS_ELLIPSE_LAYER_ID,
