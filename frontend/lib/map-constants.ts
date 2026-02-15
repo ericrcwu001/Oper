@@ -100,8 +100,8 @@ export const MAP_POINT_CRIME_BEACON_COLOR = "#FDE04780"
 /** Crime beacon footprint half-side in degrees (smaller than 911). */
 export const MAP_POINT_CRIME_BEACON_FOOTPRINT = 0.00012
 
-/** Stroke for "recommended" (closest available) unit highlight ring on the map. */
-export const MAP_POINT_RECOMMENDED_STROKE_COLOR = "#22C55E"
+/** Stroke for "recommended" (closest available) unit highlight ring on the map. Bright pink for contrast with blue/orange/green dots. */
+export const MAP_POINT_RECOMMENDED_STROKE_COLOR = "#E879F9"
 
 /** Zoom → radius (px) for the recommended-unit ring (slightly larger than unit circle). */
 export const MAP_POINT_RECOMMENDED_RING_RADIUS_BY_ZOOM: [number, number][] = [

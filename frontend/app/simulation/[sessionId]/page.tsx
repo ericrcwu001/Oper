@@ -74,6 +74,22 @@ const DEFAULT_911_POINT: MapPoint = {
   timestamp: "14:32",
 }
 
+/** Map LLM unit type to simulation vehicle type for list-click zoom. */
+function unitTypeToSimType(unit: string): "ambulance" | "police" | "fire" | null {
+  switch (unit) {
+    case "EMT_BLS":
+    case "ALS":
+      return "ambulance"
+    case "Police":
+    case "SWAT":
+      return "police"
+    case "Fire":
+      return "fire"
+    default:
+      return null
+  }
+}
+
 /** Initial map points. Optional override911 uses scenario-generated SF location for the 911 call. */
 function getInitialMapPoints(override911?: {
   lat: number
@@ -320,10 +336,13 @@ export default function LiveSimulationPage({
     latestTrigger?: { rationale: string; severity: string }[]
     resourceContextUsed?: string
     closestVehicleIds?: string[]
+    closestVehicleByType?: { ambulance?: string | null; police?: string | null; fire?: string | null }
   } | null>(null)
   const [isAssessingDispatch, setIsAssessingDispatch] = useState(false)
   /** Closest-available vehicle IDs for map highlight; updated by assess + polling so highlights stay live. */
   const [highlightedVehicleIds, setHighlightedVehicleIds] = useState<string[]>([])
+  /** When set, map flies to this point (e.g. after clicking a dispatch list item). */
+  const [mapFlyToTarget, setMapFlyToTarget] = useState<{ lat: number; lng: number } | null>(null)
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const tick30Ref = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -952,6 +971,8 @@ export default function LiveSimulationPage({
                   points={mapPointsWithRecommended}
                   selectedPointId={selectedPointId}
                   onSelectPoint={setSelectedPointId}
+                  flyToTarget={mapFlyToTarget}
+                  onFlyToComplete={() => setMapFlyToTarget(null)}
                   className="absolute inset-0 h-full w-full"
                 />
                 <div className="absolute bottom-3 left-3 z-10 flex flex-wrap gap-4 rounded-md border border-border/80 bg-card/95 px-3 py-2 text-xs shadow-sm backdrop-blur">
@@ -976,7 +997,7 @@ export default function LiveSimulationPage({
                     Crime
                   </span>
                   <span className="flex items-center gap-1.5">
-                    <span className="h-2.5 w-2.5 rounded-full border-2 border-[#22C55E] bg-transparent" aria-hidden />
+                    <span className="h-2.5 w-2.5 rounded-full border-2 border-[#E879F9] bg-transparent" aria-hidden />
                     Closest available
                   </span>
                   {crimesDate && (
@@ -1139,14 +1160,38 @@ export default function LiveSimulationPage({
                       </span>
                     </p>
                     <ul className="list-inside list-disc space-y-1 text-xs">
-                      {dispatchRecommendation.units.map((u, i) => (
-                        <li key={i}>
-                          <span className="font-medium">{u.unit}</span>
-                          {u.rationale && (
-                            <span className="text-muted-foreground"> — {u.rationale}</span>
-                          )}
-                        </li>
-                      ))}
+                      {dispatchRecommendation.units.map((u, i) => {
+                        const vehicleId = (() => {
+                          const simType = unitTypeToSimType(u.unit)
+                          if (!simType) return null
+                          return dispatchRecommendation.closestVehicleByType?.[simType] ?? null
+                        })()
+                        const point = vehicleId ? mapPoints.find((p) => p.id === vehicleId) : null
+                        const canZoom = Boolean(point)
+                        return (
+                          <li key={i}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (point) {
+                                  setMapFlyToTarget({ lat: point.lat, lng: point.lng })
+                                  setSelectedPointId(vehicleId)
+                                }
+                              }}
+                              disabled={!canZoom}
+                              className={cn(
+                                "text-left hover:underline focus:outline-none focus:underline disabled:no-underline disabled:cursor-default",
+                                canZoom && "cursor-pointer"
+                              )}
+                            >
+                              <span className="font-medium">{u.unit}</span>
+                              {u.rationale && (
+                                <span className="text-muted-foreground"> — {u.rationale}</span>
+                              )}
+                            </button>
+                          </li>
+                        )
+                      })}
                     </ul>
                   </div>
                 )}

@@ -227,6 +227,9 @@ export interface SFMapProps {
   defaultCenter?: [number, number]
   defaultZoom?: number
   className?: string
+  /** When set, map flies to this point then onFlyToComplete is called. */
+  flyToTarget?: { lat: number; lng: number } | null
+  onFlyToComplete?: () => void
 }
 
 export function SFMap({
@@ -236,6 +239,8 @@ export function SFMap({
   defaultCenter = SF_DEFAULT_CENTER,
   defaultZoom = SF_DEFAULT_ZOOM,
   className,
+  flyToTarget = null,
+  onFlyToComplete,
 }: SFMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
@@ -243,6 +248,7 @@ export function SFMap({
   const pointsRef = useRef<MapPoint[]>(points)
   const selectedPointIdRef = useRef<string | null>(selectedPointId)
   const pitchRef = useRef<number>(0)
+  const lastFlyToRef = useRef<{ lat: number; lng: number } | null>(null)
   const [pointsLayerReady, setPointsLayerReady] = useState(false)
   const [pointsVersion, setPointsVersion] = useState(0)
   if (pointsRef.current !== points) {
@@ -283,6 +289,28 @@ export function SFMap({
       mapRef.current = null
     }
   }, [defaultCenter, defaultZoom])
+
+  // Fly to target when flyToTarget is set (e.g. from dispatch list click)
+  useEffect(() => {
+    if (!flyToTarget) return
+    const map = mapRef.current
+    if (!map) return
+    const prev = lastFlyToRef.current
+    if (prev && prev.lat === flyToTarget.lat && prev.lng === flyToTarget.lng) return
+    lastFlyToRef.current = flyToTarget
+    map.flyTo(
+      { center: [flyToTarget.lng, flyToTarget.lat], zoom: 14 },
+      { duration: 800 }
+    )
+    const onComplete = () => {
+      lastFlyToRef.current = null
+      onFlyToComplete?.()
+    }
+    map.once("moveend", onComplete)
+    return () => {
+      map.off("moveend", onComplete)
+    }
+  }, [flyToTarget, onFlyToComplete])
 
   // Add points source + layer after style loads (style.load or load so we catch when map is ready)
   useEffect(() => {

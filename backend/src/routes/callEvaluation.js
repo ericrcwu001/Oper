@@ -55,9 +55,14 @@ router.post('/assess', async (req, res) => {
       ...(byType.police || []),
       ...(byType.fire || []),
     ].map((u) => u.id);
+    const closestVehicleByType = {
+      ambulance: byType.ambulance?.[0]?.id ?? null,
+      police: byType.police?.[0]?.id ?? null,
+      fire: byType.fire?.[0]?.id ?? null,
+    };
 
     const result = await assessTranscriptWithLLM(transcript, { resourceSummary: summaryForLLM });
-    res.json({ ...result, closestVehicleIds });
+    res.json({ ...result, closestVehicleIds, closestVehicleByType });
   } catch (e) {
     const message = e.message || 'Assessment failed';
     if (message.includes('OPENAI_API_KEY')) {

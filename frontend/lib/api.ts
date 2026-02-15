@@ -272,6 +272,12 @@ export interface AssessCallTranscriptResponse {
   resourceContextUsed?: string
   /** Vehicle IDs closest + available for the incident (for map highlighting). */
   closestVehicleIds?: string[]
+  /** One vehicle id per type for list-click zoom (closest ambulance, police, fire). */
+  closestVehicleByType?: {
+    ambulance?: string | null
+    police?: string | null
+    fire?: string | null
+  }
 }
 
 /**
