@@ -1,14 +1,5 @@
 "use client"
 
-import { Badge } from "@/components/ui/badge"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 import type { Session } from "@/lib/types"
 
@@ -18,19 +9,23 @@ interface SessionsTableProps {
   onSelect: (session: Session) => void
 }
 
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
+// Compact, no-wrap: "14 Feb 14:32" or "Feb 14 14:32"
+function formatLogDate(iso: string) {
+  const d = new Date(iso)
+  const day = d.getDate()
+  const mon = d.toLocaleDateString("en-US", { month: "short" })
+  const time = d.toLocaleTimeString("en-US", {
     hour: "2-digit",
     minute: "2-digit",
+    hour12: true,
   })
+  return `${day} ${mon} ${time}`
 }
 
 function formatDuration(sec: number) {
   const m = Math.floor(sec / 60)
-  const s = sec % 60
-  return `${m}m ${s}s`
+  const s = Math.floor(sec % 60)
+  return `${m}:${s.toString().padStart(2, "0")}`
 }
 
 function scoreColor(score: number) {
@@ -39,10 +34,10 @@ function scoreColor(score: number) {
   return "text-destructive"
 }
 
-function scoreBadge(score: number) {
-  if (score >= 90) return "border-accent/30 bg-accent/10 text-accent"
-  if (score >= 75) return "border-[hsl(var(--warning)/0.3)] bg-[hsl(var(--warning)/0.1)] text-[hsl(var(--warning))]"
-  return "border-destructive/30 bg-destructive/10 text-destructive"
+function difficultyTintClass(difficulty: string) {
+  if (difficulty === "easy") return "difficulty-tint-easy"
+  if (difficulty === "medium") return "difficulty-tint-medium"
+  return "difficulty-tint-hard"
 }
 
 export function SessionsTable({
@@ -53,76 +48,73 @@ export function SessionsTable({
   if (sessions.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
-        <p className="text-sm text-muted-foreground">
-          No sessions match your filters.
-        </p>
+        <p className="text-sm text-muted-foreground">No sessions yet.</p>
       </div>
     )
   }
 
+  // Time column uses minmax so it gets more space on wider screens
+  const gridCols = "minmax(6rem, 14rem) 1fr 4.5rem 3rem 3rem"
+
   return (
-    <div className="overflow-x-auto">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Date</TableHead>
-            <TableHead>Scenario</TableHead>
-            <TableHead>Difficulty</TableHead>
-            <TableHead>Language</TableHead>
-            <TableHead>Score</TableHead>
-            <TableHead>Duration</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {sessions.map((session) => (
-            <TableRow
-              key={session.id}
-              role="button"
-              tabIndex={0}
-              onClick={() => onSelect(session)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault()
-                  onSelect(session)
-                }
-              }}
-              className={cn(
-                "cursor-pointer transition-colors",
-                selectedId === session.id && "bg-primary/5"
-              )}
-            >
-              <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground">
-                {formatDate(session.startedAt)}
-              </TableCell>
-              <TableCell className="font-medium text-foreground">
-                {session.scenarioTitle}
-              </TableCell>
-              <TableCell>
-                <Badge variant="outline" className="text-xs capitalize">
-                  {session.difficulty}
-                </Badge>
-              </TableCell>
-              <TableCell className="text-xs uppercase text-muted-foreground">
-                {session.language}
-              </TableCell>
-              <TableCell>
-                <Badge
-                  variant="outline"
-                  className={cn(
-                    "font-mono text-xs font-semibold",
-                    scoreBadge(session.evaluation.overallScore)
-                  )}
-                >
-                  {session.evaluation.overallScore}
-                </Badge>
-              </TableCell>
-              <TableCell className="font-mono text-xs text-muted-foreground">
-                {formatDuration(session.durationSec)}
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+    <div className="font-mono text-xs">
+      {/* Header row: same grid as data rows so columns align */}
+      <div
+        className="sessions-log-header grid gap-x-2 px-3 py-2 text-foreground"
+        style={{ gridTemplateColumns: gridCols }}
+      >
+        <span className="truncate">Time</span>
+        <span className="min-w-0 truncate">Scenario</span>
+        <span className="truncate text-right">Diff</span>
+        <span className="truncate text-right">Score</span>
+        <span className="truncate text-right">Dur</span>
+      </div>
+      {/* Data rows: one grid per row so layout stays horizontal at any width */}
+      {sessions.map((session) => (
+        <div
+          key={session.id}
+          role="button"
+          tabIndex={0}
+          onClick={() => onSelect(session)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault()
+              onSelect(session)
+            }
+          }}
+          className={cn(
+            "grid cursor-pointer gap-x-2 border-b border-border px-3 py-2 transition-colors hover:bg-muted/50",
+            selectedId === session.id && "bg-primary/10"
+          )}
+          style={{ gridTemplateColumns: gridCols }}
+        >
+          <span className="truncate whitespace-nowrap text-muted-foreground tabular-nums">
+            {formatLogDate(session.startedAt)}
+          </span>
+          <span className="min-w-0 truncate text-foreground">
+            {session.scenarioTitle}
+          </span>
+          <span
+            className={cn(
+              "truncate text-right capitalize rounded pl-2 pr-1.5 py-0.5 w-fit justify-self-end text-foreground",
+              difficultyTintClass(session.difficulty)
+            )}
+          >
+            {session.difficulty}
+          </span>
+          <span
+            className={cn(
+              "truncate text-right font-semibold tabular-nums",
+              scoreColor(session.evaluation.overallScore)
+            )}
+          >
+            {session.evaluation.overallScore}
+          </span>
+          <span className="truncate text-right text-muted-foreground tabular-nums">
+            {formatDuration(session.durationSec)}
+          </span>
+        </div>
+      ))}
     </div>
   )
 }

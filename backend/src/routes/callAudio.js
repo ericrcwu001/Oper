@@ -280,10 +280,19 @@ router.post('/interact', async (req, res) => {
         operatorMessage = (await speechToText(wavBuffer, 'operator-audio.wav')) || operatorMessage;
       } catch (convErr) {
         const msg = convErr?.message || '';
-        const needsFfmpeg = msg.includes('ENOENT') || msg.includes('spawn ffmpeg') || msg.includes('exited');
-        if (needsFfmpeg) {
+        const ffmpegNotFound = msg.includes('ENOENT') || msg.includes('spawn ffmpeg');
+        const ffmpegExited = msg.includes('exited') && !ffmpegNotFound;
+        if (ffmpegNotFound) {
           return res.status(400).json({
-            error: 'Voice input requires ffmpeg to convert browser audio for Whisper. Install ffmpeg on your system, or use text input instead.',
+            error:
+              'Voice input requires ffmpeg to convert browser audio for Whisper. ' +
+              'Install ffmpeg and ensure it is on your PATH (or set FFMPEG_PATH to the full path to the ffmpeg executable). ' +
+              'Restart the backend after installing. Use text input if ffmpeg is not available.',
+          });
+        }
+        if (ffmpegExited) {
+          return res.status(400).json({
+            error: 'Voice conversion failed (ffmpeg error): ' + (msg || 'unknown error'),
           });
         }
         return res.status(400).json({

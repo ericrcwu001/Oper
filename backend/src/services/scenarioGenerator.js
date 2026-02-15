@@ -1,10 +1,9 @@
 /**
  * Backend scenario generation for 911 operator training.
  *
- * Generates dynamic emergency scenarios (including edge/rare cases) from a difficulty
- * level using OpenAI Chat Completions. Output is structured for:
- * 1. Frontend (scenario metadata, caller_profile, critical_info, expected_actions, etc.)
- * 2. ElevenLabs Flash v2.5 voice agent: system prompt fields and persona for voice_settings.
+ * Generates only scenario (description, caller_profile, critical_info, etc.) and timeline;
+ * persona and other voice-agent fields are derived in-code for faster, cheaper generation.
+ * Output shape is unchanged for frontend and voice/TTS consumers.
  *
  * Use buildVoiceAgentSystemPrompt(payload) to produce the full system prompt string.
  */
@@ -75,33 +74,22 @@ function pickRandomScenarioType(difficulty) {
 }
 
 // -----------------------------------------------------------------------------
-// Prompts
+// Prompts (optimized: only scenario + timeline; voice/persona derived from these)
 // -----------------------------------------------------------------------------
 
 const SYSTEM_PROMPT = `You are an AI 911 training assistant. Generate exactly ONE realistic emergency scenario. Output valid JSON only, no markdown.
 
 Rules:
-- Realistic, grounded emergencies. No language-barrier scenarios (caller always speaks English). Use the scenario_type from the user message. Easy: fire, cardiac, accident, fall, choking, lost child, gas leak. Medium: domestic dispute, overdose, robbery, assault, mental health. Hard: shooting, domestic violence, barricaded, hostage, mass casualty, suicidal, hoax.
-- Scenario is in San Francisco. Include in scenario a location: address (human-readable, e.g. "2500 Mission St, San Francisco"), lat (number 37.7–37.83), lng (number -122.52 to -122.35) so the incident can be shown on the SF map.
-- scenario: id, scenario_type, title, description (2-4 sentences; for hard: describe an evolving situation—initial crisis plus how it can escalate or cascade), caller_profile, critical_info (4-7 facts; for hard include details that become relevant as situation evolves), expected_actions (4-7), optional_complications (1-3; for hard include escalation/cascade possibilities), difficulty, language "en", location: { address: "", lat: 37.77, lng: -122.42 }.
-- persona: stability 0-1 (lower=more emotional), style 0-1, speed ~1.0, voice_description (accent, age, gender, tone). Match difficulty: easy=calm/clear (0.7+ stability); medium=anxious (0.4-0.55); hard=panicked (0.15-0.35).
-- Voice-agent fields (match difficulty): role_instruction (one line "You are [name], [age], calling 911..."), scenario_summary_for_agent (2-4 sentences; for hard, include that the situation may escalate or change and the caller will report new developments as they happen), withheld_information (0-4 items), behavior_notes, dialogue_directions (how to speak: easy=clear; hard=fragmented, crying), response_behavior (when to give address/info), opening_line, do_not_say (stay in character).
-- timeline: Include only things that happen in the scene that the operator can act on (e.g. person stops breathing, smoke appears, victim becomes unresponsive, second person found, roof caves in, shooter enters the room, weapon produced, fire spreads to adjacent building, suspect moves). Do NOT include caller behavior or emotion—forbidden: "caller becomes quieter", "caller starts crying", "caller gets more panicked", "caller goes silent", "tension rises", "caller gets more upset". Only concrete events and actionable information. Easy/medium: 1–3 events. Hard: 3–5+ events that are major scene changes (escalations, cascading danger, new threat), not filler. Empty {} only when the situation has no developing scene.
+- Realistic, grounded emergencies. Caller always speaks English. Use the scenario_type from the user message. Easy: fire, cardiac, accident, fall, choking, lost child, gas leak. Medium: domestic dispute, overdose, robbery, assault, mental health. Hard: shooting, domestic violence, barricaded, hostage, mass casualty, suicidal, hoax.
+- Scenario is in San Francisco. Include location: address (e.g. "2500 Mission St, San Francisco"), lat (37.7–37.83), lng (-122.52 to -122.35).
+- scenario: id, scenario_type, title, description (2-4 sentences; for hard include how the situation can escalate), caller_profile (name, age, emotion, gender, race, other_relevant_details), critical_info (4-7 facts), expected_actions (4-7), optional_complications (1-3), difficulty, language "en", location: { address, lat, lng }.
+- timeline: Only concrete scene events the operator can act on (e.g. person stops breathing, smoke appears, victim unresponsive, second person found, weapon produced, fire spreads). Do NOT include caller emotion or behavior (no "caller gets more panicked", "caller cries"). Easy/medium: 1–3 events. Hard: 3–5+ major events (escalations, new threats). Use string keys for seconds (e.g. "10", "25"). Empty {} if no developing scene.
 
-Difficulty: Easy=calm, volunteers info. Medium=stressed, needs prompting. Hard=panicked, does not volunteer address or key facts; operator must ask repeatedly. For hard, scenarios must be complex and dynamic: multi-phase, with sudden escalations (e.g. domestic argument → weapon produced; school incident → shooter enters caller's room; car crash → fire that spreads to a house) and cascading or compounding dangers so the call evolves significantly over time.
+Difficulty: Easy=calm, volunteers info. Medium=stressed, needs prompting. Hard=panicked, does not volunteer address or key facts; multi-phase with escalations.
 
 Output JSON (these keys only):
 {
-  "scenario": { "id": "", "scenario_type": "", "title": "", "description": "", "caller_profile": { "name": "", "age": 0, "emotion": "", "gender": "", "race": "", "other_relevant_details": "" }, "critical_info": [], "expected_actions": [], "optional_complications": [], "difficulty": "easy|medium|hard", "language": "en", "location": { "address": "e.g. 2500 Mission St, San Francisco", "lat": 37.77, "lng": -122.42 } },
-  "persona": { "stability": 0.5, "style": 0.5, "speed": 1.0, "voice_description": "" },
-  "role_instruction": "",
-  "scenario_summary_for_agent": "",
-  "withheld_information": [],
-  "behavior_notes": "",
-  "dialogue_directions": "",
-  "response_behavior": [],
-  "opening_line": "",
-  "do_not_say": [],
+  "scenario": { "id": "", "scenario_type": "", "title": "", "description": "", "caller_profile": { "name": "", "age": 0, "emotion": "", "gender": "", "race": "", "other_relevant_details": "" }, "critical_info": [], "expected_actions": [], "optional_complications": [], "difficulty": "easy|medium|hard", "language": "en", "location": { "address": "", "lat": 37.77, "lng": -122.42 } },
   "timeline": { "10": "<event>", "25": "<event>" }
 }`;
 
@@ -121,11 +109,12 @@ const VALID_DIFFICULTIES = ['easy', 'medium', 'hard'];
 
 /**
  * Generate a single scenario payload for the given difficulty.
+ * The LLM returns only scenario + timeline; persona and other voice-agent fields
+ * are derived in-code so generation is faster and cheaper.
  *
  * @param {string} difficulty - One of "easy", "medium", "hard".
- * @returns {Promise<object>} Payload with scenario (includes critical_info), persona, role_instruction,
- *   scenario_summary_for_agent, withheld_information, behavior_notes, dialogue_directions,
- *   response_behavior, opening_line, do_not_say, timeline.
+ * @returns {Promise<object>} Payload with scenario, timeline, and derived persona, role_instruction,
+ *   scenario_summary_for_agent, etc. (same shape as before for downstream consumers).
  * @throws {Error} If OPENAI_API_KEY is missing, difficulty is invalid, or OpenAI API errors.
  */
 export async function generateScenario(difficulty) {
@@ -189,7 +178,50 @@ export async function generateScenario(difficulty) {
     payload.timeline = {};
   }
 
+  deriveVoiceFields(payload);
   return payload;
+}
+
+/**
+ * Derive voice-agent fields (persona, role_instruction, etc.) from scenario + difficulty
+ * so downstream (callAudio, TTS, buildVoiceAgentSystemPrompt) still get the shape they expect
+ * without the LLM having to generate them.
+ */
+function deriveVoiceFields(payload) {
+  const scenario = payload.scenario || {};
+  const profile = scenario.caller_profile || {};
+  const difficulty = scenario.difficulty || 'medium';
+
+  const stabilityByDiff = { easy: 0.75, medium: 0.5, hard: 0.25 };
+  const styleByDiff = { easy: 0.5, medium: 0.5, hard: 0.4 };
+  const speedByDiff = { easy: 1.0, medium: 1.05, hard: 1.15 };
+  const emotion = profile.emotion || 'stressed';
+  const gender = profile.gender || '';
+  const age = profile.age != null ? profile.age : '';
+  const voiceDesc = [emotion, gender, 'caller', age !== '' ? `age ${age}` : ''].filter(Boolean).join(' ');
+
+  payload.persona = {
+    stability: stabilityByDiff[difficulty] ?? 0.5,
+    style: styleByDiff[difficulty] ?? 0.5,
+    speed: speedByDiff[difficulty] ?? 1.0,
+    voice_description: voiceDesc.trim() || 'stressed caller',
+  };
+
+  const name = profile.name || 'Caller';
+  const agePart = profile.age != null ? `, ${profile.age}` : '';
+  payload.role_instruction = `You are ${name}${agePart}, calling 911. ${(scenario.description || '').trim().slice(0, 200)}`;
+  payload.scenario_summary_for_agent = (scenario.description || '').trim() || payload.role_instruction;
+
+  payload.withheld_information = payload.withheld_information ?? [];
+  payload.behavior_notes = difficulty === 'hard'
+    ? 'Panicked; may omit key details until operator asks directly.'
+    : difficulty === 'easy'
+      ? 'Worried but cooperative; volunteers key info.'
+      : 'Stressed; may need prompting for some details.';
+  payload.dialogue_directions = '';
+  payload.response_behavior = payload.response_behavior ?? [];
+  payload.opening_line = payload.opening_line ?? '';
+  payload.do_not_say = payload.do_not_say ?? [];
 }
 
 /**

@@ -1,8 +1,9 @@
 "use client"
 
 import { useState, useEffect, use } from "react"
-import { useSearchParams } from "next/navigation"
+import { useSearchParams, usePathname } from "next/navigation"
 import Link from "next/link"
+import { useSidebarTabs } from "@/context/sidebar-tabs-context"
 import { AppShell } from "@/components/app-shell"
 import { ScoreCard } from "@/components/score-card"
 import { Button } from "@/components/ui/button"
@@ -55,6 +56,7 @@ function timelineEntries(timeline: Record<string, string> | undefined): { second
 }
 
 const STORAGE_KEY_GENERATED = "simulation-generated-scenario"
+const STORAGE_KEY_EVALUATION = "simulation-evaluation"
 
 export default function ReviewPage({
   params,
@@ -63,6 +65,8 @@ export default function ReviewPage({
 }) {
   const { sessionId } = use(params)
   const searchParams = useSearchParams()
+  const pathname = usePathname()
+  const { addTab, updateTab, setNewCallModalOpen, activeCall } = useSidebarTabs()
   const scenarioIdFromUrl = searchParams.get("scenario")
 
   const [scenario, setScenario] = useState(() =>
@@ -95,12 +99,28 @@ export default function ReviewPage({
     }
   }, [sessionId])
 
+  useEffect(() => {
+    if (!sessionId) return
+    const q = searchParams.toString()
+    const href = q ? `${pathname}?${q}` : pathname
+    const label = scenario?.title ?? "Feedback"
+    addTab({ id: `feedback-${sessionId}`, label, href, type: "feedback" })
+  }, [sessionId, pathname, searchParams, addTab, scenario?.title])
+
+  useEffect(() => {
+    if (!sessionId || !scenario?.title) return
+    updateTab(`feedback-${sessionId}`, { label: scenario.title })
+  }, [sessionId, scenario?.title, updateTab])
+
   const [evaluation, setEvaluation] = useState<Evaluation | null>(null)
   const [reviewTranscript, setReviewTranscript] = useState<TranscriptTurn[]>([])
   const [searchQuery, setSearchQuery] = useState("")
   const [reviewNotes, setReviewNotes] = useState<NoteEntry[]>([])
   const [evaluationError, setEvaluationError] = useState<string | null>(null)
+  const [initialLoadDone, setInitialLoadDone] = useState(false)
 
+  // Load transcript, notes, scenario, and evaluation. Always fetch from DB so we use stored
+  // evaluation when available (no slow re-run of evaluateCall for previously-completed sessions).
   useEffect(() => {
     if (typeof window === "undefined") return
     let cancelled = false
@@ -108,6 +128,7 @@ export default function ReviewPage({
       try {
         const rawT = sessionStorage.getItem(`simulation-transcript-${sessionId}`)
         const rawN = sessionStorage.getItem(`simulation-notes-${sessionId}`)
+        const rawE = sessionStorage.getItem(`${STORAGE_KEY_EVALUATION}-${sessionId}`)
         if (rawT) {
           const parsed = JSON.parse(rawT) as TranscriptTurn[]
           if (Array.isArray(parsed) && !cancelled) setReviewTranscript(parsed)
@@ -116,11 +137,19 @@ export default function ReviewPage({
           const parsed = JSON.parse(rawN) as NoteEntry[]
           if (Array.isArray(parsed) && !cancelled) setReviewNotes(parsed)
         }
-        if (!rawT || !rawN) {
-          const { data } = await getSimulation(sessionId)
-          if (cancelled || !data) return
-          if (data.data.transcript?.length) setReviewTranscript(data.data.transcript as TranscriptTurn[])
-          if (data.data.notes?.length) setReviewNotes(data.data.notes as NoteEntry[])
+        if (rawE) {
+          try {
+            const e = JSON.parse(rawE) as Evaluation
+            if (typeof e?.overallScore === "number" && !cancelled) setEvaluation(e)
+          } catch {
+            // ignore invalid stored evaluation
+          }
+        }
+        const { data } = await getSimulation(sessionId)
+        if (cancelled) return
+        if (data?.data) {
+          if (!rawT && data.data.transcript?.length) setReviewTranscript(data.data.transcript as TranscriptTurn[])
+          if (!rawN && data.data.notes?.length) setReviewNotes(data.data.notes as NoteEntry[])
           if (data.data.scenarioTimeline && typeof data.data.scenarioTimeline === "object") {
             setScenarioTimeline(data.data.scenarioTimeline)
           }
@@ -137,11 +166,20 @@ export default function ReviewPage({
           }
           if (data.data.evaluation && typeof data.data.evaluation === "object") {
             const e = data.data.evaluation as Evaluation
-            if (typeof e.overallScore === "number") setEvaluation(e)
+            if (typeof e.overallScore === "number") {
+              setEvaluation(e)
+              try {
+                sessionStorage.setItem(`${STORAGE_KEY_EVALUATION}-${sessionId}`, JSON.stringify(e))
+              } catch {
+                // ignore
+              }
+            }
           }
         }
       } catch {
         // ignore
+      } finally {
+        if (!cancelled) setInitialLoadDone(true)
       }
     }
     load()
@@ -150,9 +188,9 @@ export default function ReviewPage({
     }
   }, [sessionId])
 
+  // Only run evaluation when we've finished loading and still have no stored evaluation.
   useEffect(() => {
-    if (evaluation != null) return
-    if (reviewTranscript.length === 0) return
+    if (!initialLoadDone || evaluation != null || reviewTranscript.length === 0) return
     setEvaluationError(null)
     let cancelled = false
     evaluateCall(
@@ -162,7 +200,14 @@ export default function ReviewPage({
       Object.keys(scenarioTimeline).length > 0 ? scenarioTimeline : undefined
     )
       .then(async (e) => {
-        if (!cancelled) setEvaluation(e)
+        if (!cancelled) {
+          setEvaluation(e)
+          try {
+            sessionStorage.setItem(`${STORAGE_KEY_EVALUATION}-${sessionId}`, JSON.stringify(e))
+          } catch {
+            // ignore
+          }
+        }
         const scenarioPayload = {
           id: scenario.id,
           scenarioType: scenario.scenarioType,
@@ -190,7 +235,7 @@ export default function ReviewPage({
     return () => {
       cancelled = true
     }
-  }, [reviewTranscript, reviewNotes, scenario.description, scenarioTimeline, sessionId, scenario])
+  }, [initialLoadDone, evaluation, reviewTranscript, reviewNotes, scenario.description, scenarioTimeline, sessionId, scenario])
 
   useEffect(() => {
     if (!evaluation) return
@@ -243,21 +288,25 @@ export default function ReviewPage({
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" asChild className="gap-2">
+            <Button variant="outline" size="sm" asChild className="gap-2">
               <Link href={`/simulation/${sessionId}?scenario=${scenario.id}`}>
-                <RotateCcw className="h-4 w-4" />
+                <RotateCcw className="h-3.5 w-3.5" />
                 Retry
               </Link>
             </Button>
-            <Button variant="outline" asChild className="gap-2">
-              <Link href="/simulation">
-                <Plus className="h-4 w-4" />
-                New Call
-              </Link>
+            <Button
+              size="sm"
+              disabled={!!activeCall}
+              title={activeCall ? "End the current call first" : undefined}
+              className="gap-1.5 border border-white/50 bg-white/10 text-white hover:!bg-white hover:!border-white hover:!text-black disabled:opacity-50 disabled:pointer-events-none"
+              onClick={() => !activeCall && setNewCallModalOpen(true)}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              New call
             </Button>
-            <Button asChild className="gap-2">
+            <Button size="sm" asChild className="gap-2">
               <Link href="/dashboard">
-                <LayoutDashboard className="h-4 w-4" />
+                <LayoutDashboard className="h-3.5 w-3.5" />
                 Dashboard
               </Link>
             </Button>
@@ -405,10 +454,10 @@ export default function ReviewPage({
               </Card>
             )}
 
-            {/* Operator Summary – notes taken during the call */}
+            {/* Operator notes — notes taken during the call */}
             <Card className="border bg-card">
               <CardHeader className="pb-3">
-                <CardTitle className="text-base">Operator Summary</CardTitle>
+                <CardTitle className="text-base">Operator notes</CardTitle>
               </CardHeader>
               <CardContent>
                 {reviewNotes.length === 0 ? (

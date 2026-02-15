@@ -35,8 +35,12 @@ let vehicles = [];
 let positions = [];
 let intervalId = null;
 let tickCount = 0;
-/** Active crime locations { lat, lng }[] from frontend (POST /api/simulation/crimes). */
+/** Active crime locations { lat, lng }[] from frontend (POST /api/vehicles/crimes). */
 let activeCrimes = [];
+/** 911 call / dispatch target; vehicles in dispatchVehicleIds always steer toward it. */
+let dispatchTarget = null;
+/** Vehicle ids (e.g. ["police-12", "ambulance-3"]) that should head toward dispatchTarget. */
+let dispatchVehicleIds = [];
 
 function loadGraph() {
   if (fs.existsSync(GRAPH_PATH)) {
@@ -100,7 +104,44 @@ function pickNextEdge(g, v) {
   }
 
   const atPos = nodes[atNode];
-  if (!atPos || activeCrimes.length === 0) {
+  if (!atPos) {
+    const nextEdgeIdx = incident[Math.floor(Math.random() * incident.length)];
+    const nextEdge = edges[nextEdgeIdx];
+    const fromNext = nextEdge.fromNodeIdx === atNode;
+    v.currentEdge = nextEdgeIdx;
+    v.targetNode = fromNext ? nextEdge.toNodeIdx : nextEdge.fromNodeIdx;
+    v.towardEnd = fromNext;
+    v.t = fromNext ? 0 : 1;
+    return;
+  }
+
+  // Purple-highlighted (recommended) vehicles: always steer toward 911 dispatch target when set
+  if (dispatchTarget && dispatchVehicleIds.length > 0 && dispatchVehicleIds.includes(v.id)) {
+    const targetPos = [dispatchTarget.lat, dispatchTarget.lng];
+    let bestEdgeIdx = incident[0];
+    let bestDist = Infinity;
+    for (const ei of incident) {
+      const e = edges[ei];
+      const otherNode = e.fromNodeIdx === atNode ? e.toNodeIdx : e.fromNodeIdx;
+      const otherPos = nodes[otherNode];
+      if (!otherPos) continue;
+      const d = haversineMeters(otherPos, targetPos);
+      if (d < bestDist) {
+        bestDist = d;
+        bestEdgeIdx = ei;
+      }
+    }
+    v.status = 1;
+    const nextEdge = edges[bestEdgeIdx];
+    const fromNext = nextEdge.fromNodeIdx === atNode;
+    v.currentEdge = bestEdgeIdx;
+    v.targetNode = fromNext ? nextEdge.toNodeIdx : nextEdge.fromNodeIdx;
+    v.towardEnd = fromNext;
+    v.t = fromNext ? 0 : 1;
+    return;
+  }
+
+  if (activeCrimes.length === 0) {
     v.status = 0;
     const nextEdgeIdx = incident[Math.floor(Math.random() * incident.length)];
     const nextEdge = edges[nextEdgeIdx];
@@ -283,4 +324,15 @@ export function setActiveCrimes(crimes) {
     for (const v of vehicles) v.status = 0;
   }
   activeCrimes = next;
+}
+
+/**
+ * Set 911 dispatch target so highlighted (recommended) vehicles steer toward it.
+ * Vehicles whose id is in vehicleIds always pick edges toward target; others use crime logic.
+ * @param {{ lat: number, lng: number } | null} target - 911 call location or null to clear
+ * @param {string[]} vehicleIds - e.g. ["police-12", "ambulance-3"]
+ */
+export function setDispatchTarget(target, vehicleIds) {
+  dispatchTarget = target && typeof target.lat === "number" && typeof target.lng === "number" ? target : null;
+  dispatchVehicleIds = Array.isArray(vehicleIds) ? vehicleIds : [];
 }

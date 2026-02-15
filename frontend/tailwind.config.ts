@@ -64,12 +64,12 @@ const config: Config = {
       },
       borderRadius: {
         lg: 'var(--radius)',
-        md: 'calc(var(--radius) - 2px)',
-        sm: 'calc(var(--radius) - 4px)',
+        md: 'var(--radius)',
+        sm: 'var(--radius)',
       },
       fontFamily: {
-        sans: ['var(--font-geist-sans)', 'system-ui', 'sans-serif'],
-        mono: ['var(--font-geist-mono)', 'monospace'],
+        sans: ["var(--font-terminal)", "ui-monospace", "SF Mono", "Monaco", "Cascadia Mono", "Segoe UI Mono", "Consolas", "monospace"],
+        mono: ["var(--font-terminal)", "ui-monospace", "SF Mono", "Monaco", "Cascadia Mono", "Segoe UI Mono", "Consolas", "monospace"],
       },
       keyframes: {
         'accordion-down': {
