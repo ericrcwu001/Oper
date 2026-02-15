@@ -72,7 +72,7 @@ function buildPersonaInstructions(payload, isOpening) {
   }
 
   if (isOpening && payload.opening_line) {
-    parts.push(`Opening: Start with something like: "${payload.opening_line}" (expand naturally into one short paragraph, do not copy verbatim).`);
+    parts.push(`Opening: Start with something like: "${payload.opening_line}" (expand naturally but keep it short, 25 words max, do not copy verbatim).`);
   }
 
   const doNot = payload.do_not_say;
