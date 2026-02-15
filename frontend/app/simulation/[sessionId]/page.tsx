@@ -60,20 +60,35 @@ import {
   CRIME_SIM_CLOCK_SPEEDUP,
 } from "@/lib/simulation-constants"
 
-/** Initial map points with hardcoded popup data (no backend). */
-function getInitialMapPoints(): MapPoint[] {
+/** Default 911 call point (used when no scenario location). */
+const DEFAULT_911_POINT: MapPoint = {
+  id: "call-1",
+  type: "911",
+  lat: 37.7749,
+  lng: -122.4194,
+  location: "2500 Mission St, SF",
+  description: "Cardiac arrest reported",
+  callerId: "CALL-001",
+  callerName: "Jane Doe",
+  timestamp: "14:32",
+}
+
+/** Initial map points. Optional override911 uses scenario-generated SF location for the 911 call. */
+function getInitialMapPoints(override911?: {
+  lat: number
+  lng: number
+  address: string
+}): MapPoint[] {
+  const callPoint: MapPoint = override911
+    ? {
+        ...DEFAULT_911_POINT,
+        lat: override911.lat,
+        lng: override911.lng,
+        location: override911.address,
+      }
+    : DEFAULT_911_POINT
   return [
-    {
-      id: "call-1",
-      type: "911",
-      lat: 37.7749,
-      lng: -122.4194,
-      location: "2500 Mission St, SF",
-      description: "Cardiac arrest reported",
-      callerId: "CALL-001",
-      callerName: "Jane Doe",
-      timestamp: "14:32",
-    },
+    callPoint,
     {
       id: "unit-p1",
       type: "police",
@@ -206,6 +221,12 @@ export default function LiveSimulationPage({
   const [scenario, setScenario] = useState<Scenario>(fallbackScenario)
   const [scenarioPayload, setScenarioPayload] =
     useState<GeneratedScenarioPayload | null>(null)
+  const [scenarioCallLocation, setScenarioCallLocation] = useState<{
+    lat: number
+    lng: number
+    address: string
+  } | null>(null)
+  const scenarioCallLocationRef = useRef<typeof scenarioCallLocation>(null)
 
   useEffect(() => {
     try {
@@ -226,6 +247,28 @@ export default function LiveSimulationPage({
     setScenario(fallbackScenario)
     setScenarioPayload(null)
   }, [sessionId, scenarioIdFromUrl])
+
+  scenarioCallLocationRef.current = scenarioCallLocation
+
+  useEffect(() => {
+    const loc = scenarioPayload?.scenario?.location
+    if (loc && typeof loc.lat === "number" && typeof loc.lng === "number") {
+      setScenarioCallLocation({ lat: loc.lat, lng: loc.lng, address: loc.address ?? "San Francisco, CA" })
+    } else {
+      setScenarioCallLocation(null)
+    }
+  }, [scenarioPayload])
+
+  useEffect(() => {
+    if (!scenarioCallLocation) return
+    setMapPoints((prev) =>
+      prev.map((p) =>
+        p.id === "call-1" && p.type === "911"
+          ? { ...p, lat: scenarioCallLocation.lat, lng: scenarioCallLocation.lng, location: scenarioCallLocation.address }
+          : p
+      )
+    )
+  }, [scenarioCallLocation])
 
   const scenarioForApi: CallScenarioInput =
     scenarioPayload ?? buildScenarioPayload(scenario, selectedDifficulty)
@@ -367,7 +410,7 @@ export default function LiveSimulationPage({
         await postCrimesForSteering(crimesForBackend).catch(() => {})
         const vehicles = await fetchVehicles()
         if (vehicles.length > 0) {
-          const initial = getInitialMapPoints()
+          const initial = getInitialMapPoints(scenarioCallLocation ?? undefined)
           const callPoint = initial.find((p) => p.type === "911")
           const base = (callPoint ? [callPoint, ...vehicles] : vehicles) as MapPoint[]
           setMapPoints([...base, ...crimePointsRef.current])
@@ -380,7 +423,7 @@ export default function LiveSimulationPage({
     poll()
     const id = setInterval(poll, POLL_MS)
     return () => clearInterval(id)
-  }, [])
+  }, [scenarioCallLocation])
 
   // Single time tick: advance crime sim clock, resolve crimes when enough vehicles at scene long enough, then update map
   useEffect(() => {
@@ -440,7 +483,7 @@ export default function LiveSimulationPage({
           const nonCrime = prev.filter((p) => p.type !== "crime")
           next = [...nonCrime, ...crimes]
         } else {
-          const base = getInitialMapPoints()
+          const base = getInitialMapPoints(scenarioCallLocationRef.current ?? undefined)
           const police = base.find((p) => p.id === "unit-p1")
           if (!police || police.type !== "police") {
             next = [...base, ...crimes]

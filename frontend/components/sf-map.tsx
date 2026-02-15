@@ -11,8 +11,7 @@ import {
   SF_DEFAULT_ZOOM,
   MAP_POINT_COLORS,
   MAP_POINT_OUTLINE_COLOR,
-  MAP_POINT_RADIUS_BY_ZOOM,
-  MAP_POINT_RADIUS_SELECTED_BY_ZOOM,
+  MAP_POINT_911_STROKE_COLOR,
   CRIME_POINT_STROKE_COLOR,
 } from "@/lib/map-constants"
 import { getSFMapStyle } from "@/lib/map-style"
@@ -46,6 +45,15 @@ function pointsToGeoJSON(points: MapPoint[]): GeoJSON.FeatureCollection {
 const POINTS_SOURCE_ID = "map-points"
 const POINTS_LAYER_ID = "map-points-circles"
 const POINTS_LAYER_SELECTED_ID = "map-points-circles-selected"
+const POINTS_LAYER_911_ID = "map-points-circles-911"
+const POINTS_LAYER_911_SELECTED_ID = "map-points-circles-911-selected"
+
+const ALL_POINT_LAYER_IDS = [
+  POINTS_LAYER_ID,
+  POINTS_LAYER_SELECTED_ID,
+  POINTS_LAYER_911_ID,
+  POINTS_LAYER_911_SELECTED_ID,
+]
 
 export interface SFMapProps {
   points: MapPoint[]
@@ -114,8 +122,6 @@ export function SFMap({
     const addPointsLayer = () => {
       if (map.getSource(POINTS_SOURCE_ID)) return
 
-      const radiusByZoom = MAP_POINT_RADIUS_BY_ZOOM
-      const radiusSelectedByZoom = MAP_POINT_RADIUS_SELECTED_BY_ZOOM
       const withSelection = (pointsRef.current ?? []).map((p) => ({
         ...p,
         selected: p.id === (selectedPointIdRef.current ?? null),
@@ -125,23 +131,58 @@ export function SFMap({
         data: pointsToGeoJSON(withSelection),
       })
 
-      // Zoom must be the input to a top-level interpolate only. Scale (radiusScale × crime 2×) applied in stop values.
-      const radiusScaleAndType = [
-        "*",
-        ["coalesce", ["get", "radiusScale"], 1],
-        ["case", ["==", ["get", "type"], "crime"], 2, 1],
-      ]
+      // One zoom-based interpolate only: stop values are type-dependent (911 fixed radius, crime 2×, else base).
       const radiusExpr = [
         "interpolate",
         ["linear"],
         ["zoom"],
-        ...radiusByZoom.flatMap(([z, r]) => [z, ["*", ...radiusScaleAndType.slice(1), r]]),
+        11,
+        [
+          "case",
+          ["==", ["get", "type"], "911"],
+          7,
+          ["*", ["coalesce", ["get", "radiusScale"], 1], ["case", ["==", ["get", "type"], "crime"], 6, 3]],
+        ],
+        14,
+        [
+          "case",
+          ["==", ["get", "type"], "911"],
+          11,
+          ["*", ["coalesce", ["get", "radiusScale"], 1], ["case", ["==", ["get", "type"], "crime"], 10, 5]],
+        ],
+        16,
+        [
+          "case",
+          ["==", ["get", "type"], "911"],
+          15,
+          ["*", ["coalesce", ["get", "radiusScale"], 1], ["case", ["==", ["get", "type"], "crime"], 14, 7]],
+        ],
       ]
       const radiusSelectedExpr = [
         "interpolate",
         ["linear"],
         ["zoom"],
-        ...radiusSelectedByZoom.flatMap(([z, r]) => [z, ["*", ...radiusScaleAndType.slice(1), r]]),
+        11,
+        [
+          "case",
+          ["==", ["get", "type"], "911"],
+          9,
+          ["*", ["coalesce", ["get", "radiusScale"], 1], ["case", ["==", ["get", "type"], "crime"], 11, 5.5]],
+        ],
+        14,
+        [
+          "case",
+          ["==", ["get", "type"], "911"],
+          13,
+          ["*", ["coalesce", ["get", "radiusScale"], 1], ["case", ["==", ["get", "type"], "crime"], 15, 7.5]],
+        ],
+        16,
+        [
+          "case",
+          ["==", ["get", "type"], "911"],
+          17,
+          ["*", ["coalesce", ["get", "radiusScale"], 1], ["case", ["==", ["get", "type"], "crime"], 19, 9.5]],
+        ],
       ]
 
       const paintBase = {
@@ -165,21 +206,27 @@ export function SFMap({
             "#9ca3af",
           ],
         ],
-        "circle-stroke-width": ["case", ["==", ["get", "type"], "crime"], 2.5, 1.8],
+        "circle-stroke-width": [
+          "case",
+          ["==", ["get", "type"], "911"],
+          3,
+          ["case", ["==", ["get", "type"], "crime"], 2.5, 1.8],
+        ],
         "circle-stroke-color": [
           "case",
-          ["==", ["get", "type"], "crime"],
-          CRIME_POINT_STROKE_COLOR,
-          MAP_POINT_OUTLINE_COLOR,
+          ["==", ["get", "type"], "911"],
+          MAP_POINT_911_STROKE_COLOR,
+          ["case", ["==", ["get", "type"], "crime"], CRIME_POINT_STROKE_COLOR, MAP_POINT_OUTLINE_COLOR],
         ],
         "circle-opacity": ["case", ["get", "disabled"], 0.4, 0.98],
       }
 
+      // Non-911 points (drawn first, underneath)
       map.addLayer({
         id: POINTS_LAYER_ID,
         type: "circle",
         source: POINTS_SOURCE_ID,
-        filter: ["!", ["get", "selected"]],
+        filter: ["all", ["!", ["get", "selected"]], ["!=", ["get", "type"], "911"]],
         paint: {
           ...paintBase,
           "circle-radius": radiusExpr,
@@ -190,7 +237,30 @@ export function SFMap({
         id: POINTS_LAYER_SELECTED_ID,
         type: "circle",
         source: POINTS_SOURCE_ID,
-        filter: ["get", "selected"],
+        filter: ["all", ["get", "selected"], ["!=", ["get", "type"], "911"]],
+        paint: {
+          ...paintBase,
+          "circle-radius": radiusSelectedExpr,
+        },
+      })
+
+      // 911 points drawn on top of all other markers
+      map.addLayer({
+        id: POINTS_LAYER_911_ID,
+        type: "circle",
+        source: POINTS_SOURCE_ID,
+        filter: ["all", ["!", ["get", "selected"]], ["==", ["get", "type"], "911"]],
+        paint: {
+          ...paintBase,
+          "circle-radius": radiusExpr,
+        },
+      })
+
+      map.addLayer({
+        id: POINTS_LAYER_911_SELECTED_ID,
+        type: "circle",
+        source: POINTS_SOURCE_ID,
+        filter: ["all", ["get", "selected"], ["==", ["get", "type"], "911"]],
         paint: {
           ...paintBase,
           "circle-radius": radiusSelectedExpr,
@@ -324,7 +394,7 @@ export function SFMap({
     const handleClick = (e: maplibregl.MapMouseEvent) => {
       if (!map.getLayer(POINTS_LAYER_ID)) return
       const features = map.queryRenderedFeatures(e.point, {
-        layers: [POINTS_LAYER_ID, POINTS_LAYER_SELECTED_ID],
+        layers: ALL_POINT_LAYER_IDS,
       })
       if (features.length === 0) return
       const feature = features[0]
@@ -351,7 +421,7 @@ export function SFMap({
     const handleMouseMove = (e: maplibregl.MapMouseEvent) => {
       if (!map.getLayer(POINTS_LAYER_ID)) return
       const features = map.queryRenderedFeatures(e.point, {
-        layers: [POINTS_LAYER_ID, POINTS_LAYER_SELECTED_ID],
+        layers: ALL_POINT_LAYER_IDS,
       })
       map.getCanvas().style.cursor = features.length > 0 ? "pointer" : ""
     }

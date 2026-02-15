@@ -40,6 +40,8 @@ export interface GeneratedScenarioPayload {
     optional_complications?: string[]
     difficulty: "easy" | "medium" | "hard"
     language: string
+    /** SF map location for the incident (lat 37.7–37.83, lng -122.52 to -122.35). */
+    location?: { address: string; lat: number; lng: number }
   }
   persona?: {
     stability?: number

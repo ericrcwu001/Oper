@@ -34,6 +34,9 @@ export const CRIME_POINT_STROKE_COLOR = "#F97316"
 /** Outline color for points (matches map background). */
 export const MAP_POINT_OUTLINE_COLOR = "#0B0C0E"
 
+/** 911 call marker stroke (high visibility). */
+export const MAP_POINT_911_STROKE_COLOR = "#FFFFFF"
+
 /** MapLibre zoom → circle radius (px). [zoom, radius] pairs for interpolate. */
 export const MAP_POINT_RADIUS_BY_ZOOM: [number, number][] = [
   [11, 3],
@@ -41,11 +44,25 @@ export const MAP_POINT_RADIUS_BY_ZOOM: [number, number][] = [
   [16, 7],
 ]
 
+/** 911 call marker: larger so it’s the most prominent point on the map. */
+export const MAP_POINT_911_RADIUS_BY_ZOOM: [number, number][] = [
+  [11, 7],
+  [14, 11],
+  [16, 15],
+]
+
 /** Zoom → radius for selected points (base + offset). Used in a separate layer so zoom stays top-level. */
 export const MAP_POINT_RADIUS_SELECTED_BY_ZOOM: [number, number][] = [
   [11, 5.5],
   [14, 7.5],
   [16, 9.5],
+]
+
+/** 911 call marker when selected (slightly larger than base 911 radius). */
+export const MAP_POINT_911_RADIUS_SELECTED_BY_ZOOM: [number, number][] = [
+  [11, 9],
+  [14, 13],
+  [16, 17],
 ]
 
 /** Extra radius when point is selected (px). */
